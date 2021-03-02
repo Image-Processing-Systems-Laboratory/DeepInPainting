@@ -10,3 +10,5 @@ saveimg*
 /disocclusion_img_mask
 /checkpoints
 *.pt
+.ipynb_checkpoints
+.\\checkpoints
