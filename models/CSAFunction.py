@@ -16,7 +16,7 @@ class CSAFunction(torch.autograd.Function):
         ctx.flag = flag
         ctx.flatten_offsets = flatten_offsets
 
-
+        
         ctx.bz, c_real, ctx.h, ctx.w = input.size()
         c = c_real
         ctx.Tensor = torch.cuda.FloatTensor if torch.cuda.is_available else torch.FloatTensor
@@ -24,8 +24,6 @@ class CSAFunction(torch.autograd.Function):
 
 
         assert mask.dim() == 2, "Mask dimension must be 2"
-
-
         # bz is the batchsize of this GPU
         output_lst = ctx.Tensor(ctx.bz, c, ctx.h, ctx.w)
         ind_lst = torch.LongTensor(ctx.bz, ctx.h*ctx.w, ctx.h, ctx.w)
@@ -50,9 +48,8 @@ class CSAFunction(torch.autograd.Function):
             output_var = Variable(output)
             tmp1 = conv_enc(output_var)
 
-
             maxcoor = MaxCoord()
-
+         
             kbar, ind, vmax = maxcoor.update_output(tmp1.data, sp_x, sp_y)
             real_patches = kbar.size(1) + torch.sum(ctx.flag)
             vamx_mask=vmax.index_select(0,mask_point_idx)
