@@ -1,2 +1,12 @@
 *.tar
+*.zip
+/models/__pycache__
+/util/__pycache__
 /paris_original
+saveimg*
+/result
+/paris_validation
+/paris_original_test
+/disocclusion_img_mask
+/checkpoints
+*.pt
