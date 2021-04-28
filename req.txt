@@ -1,0 +1,70 @@
+attrs==19.3.0
+backcall==0.2.0
+bleach==3.1.5
+certifi==2020.12.5
+chardet==4.0.0
+click==7.1.2
+cycler==0.10.0
+decorator==4.4.2
+defusedxml==0.6.0
+entrypoints==0.3
+filelock==3.0.12
+Flask==1.1.2
+future==0.18.2
+gdown==3.12.2
+idna==2.10
+importlib-metadata==1.6.1
+ipykernel @ file:///tmp/build/80754af9/ipykernel_1596206602906/work/dist/ipykernel-5.3.4-py3-none-any.whl
+ipython @ file:///tmp/build/80754af9/ipython_1593447367857/work
+ipython-genutils==0.2.0
+ipywidgets==7.5.1
+IQA-pytorch==0.1
+itsdangerous==1.1.0
+jedi @ file:///tmp/build/80754af9/jedi_1606932572482/work
+Jinja2==2.11.2
+jsonschema==3.2.0
+jupyter==1.0.0
+jupyter-client @ file:///tmp/build/80754af9/jupyter_client_1601311786391/work
+jupyter-console==6.1.0
+jupyter-core @ file:///tmp/build/80754af9/jupyter_core_1606148976284/work
+kiwisolver==1.3.1
+MarkupSafe==1.1.1
+matplotlib==3.3.4
+mistune==0.8.4
+nbconvert==5.6.1
+nbformat==5.0.7
+notebook==6.0.3
+numpy==1.18.5
+packaging==20.4
+pandocfilters==1.4.2
+parso==0.8.1
+pexpect==4.8.0
+pickleshare==0.7.5
+Pillow==7.1.2
+prometheus-client==0.8.0
+prompt-toolkit @ file:///tmp/build/80754af9/prompt-toolkit_1602688806899/work
+ptyprocess @ file:///tmp/build/80754af9/ptyprocess_1609355006118/work/dist/ptyprocess-0.7.0-py2.py3-none-any.whl
+Pygments @ file:///tmp/build/80754af9/pygments_1610565767015/work
+pyparsing==2.4.7
+pyrsistent==0.16.0
+PySocks==1.7.1
+python-dateutil==2.8.1
+pyzmq==20.0.0
+qtconsole==4.7.4
+QtPy==1.9.0
+requests==2.25.1
+Send2Trash==1.5.0
+six==1.15.0
+terminado==0.8.3
+testpath==0.4.4
+torch==1.5.1
+torchvision==0.6.1
+tornado @ file:///tmp/build/80754af9/tornado_1606942266872/work
+tqdm==4.56.0
+traitlets==4.3.3
+urllib3==1.26.2
+wcwidth @ file:///tmp/build/80754af9/wcwidth_1593447189090/work
+webencodings==0.5.1
+Werkzeug==0.16.0
+widgetsnbextension==3.5.1
+zipp==3.1.0

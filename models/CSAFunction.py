@@ -10,25 +10,30 @@ from torch.autograd import Variable
 class CSAFunction(torch.autograd.Function):
 
     @staticmethod
-    def forward(ctx, input, mask, shift_sz, stride, triple_w, flag, nonmask_point_idx,mask_point_idx ,flatten_offsets, sp_x, sp_y):
-        assert input.dim() == 4, "Input Dim has to be 4"
-        ctx.triple_w = triple_w
-        ctx.flag = flag
-        ctx.flatten_offsets = flatten_offsets
+    def forward(ctx, input, mask, ref, shift_sz, stride, triple_w, flag, nonmask_point_idx, mask_point_idx ,flatten_offsets, sp_x, sp_y):
+        # ctx = context <- pytorch: forward, backward, weight temp
+        assert input.dim() == 4, "Input Dim has to be 4"  # [1, 512, 32, 32]
+        
+        
+        #ctx.ref = ref
+        ctx.triple_w = triple_w   # ???
+        ctx.flag = flag           # [mask index]
+        ctx.flatten_offsets = flatten_offsets   #
 
-
-        ctx.bz, c_real, ctx.h, ctx.w = input.size()
-        c = c_real
+        
+        ctx.bz, c_real, ctx.h, ctx.w = input.size()  # [1, 512, 32, 32]
+        
+        c = c_real   # 512 channel == c
+        
         ctx.Tensor = torch.cuda.FloatTensor if torch.cuda.is_available else torch.FloatTensor
 
 
 
         assert mask.dim() == 2, "Mask dimension must be 2"
-
-
+        
         # bz is the batchsize of this GPU
-        output_lst = ctx.Tensor(ctx.bz, c, ctx.h, ctx.w)
-        ind_lst = torch.LongTensor(ctx.bz, ctx.h*ctx.w, ctx.h, ctx.w)
+        output_lst = ctx.Tensor(ctx.bz, c, ctx.h, ctx.w)     # output
+        ind_lst = torch.LongTensor(ctx.bz, ctx.h*ctx.w, ctx.h, ctx.w)   #[1, 1024, 32, 32]
 
         if torch.cuda.is_available:
             ind_lst = ind_lst.cuda()
@@ -36,25 +41,32 @@ class CSAFunction(torch.autograd.Function):
             mask_point_idx = mask_point_idx.cuda()
             sp_x = sp_x.cuda()
             sp_y = sp_y.cuda()
+            
+        
+        for idx in range(ctx.bz):    # 1
 
-        for idx in range(ctx.bz):
-
-
-            inpatch = input.narrow(0, idx, 1)
-            output = input.narrow(0, idx, 1)
+            inpatch = input.narrow(0, idx, 1)       # [1, 512, 32, 32] -> feature map -> source feature
+            output = ref.relu4_3.narrow(0, idx, 1)        # [1, 512, 32, 32] -> feature map -> ref feature
 
             Nonparm = NonparametricShift()
 
-            _, conv_enc, conv_new_dec,_,known_patch, unknown_patch = Nonparm.buildAutoencoder(inpatch.squeeze(), False, False, nonmask_point_idx,mask_point_idx,  shift_sz, stride)
+            
+            _, conv_enc, conv_new_dec, _, known_patch, unknown_patch = Nonparm.buildAutoencoder(inpatch.squeeze(), False, False, nonmask_point_idx, mask_point_idx, shift_sz, stride)   # inpatch.squeeze() -> [512, 32, 32]
 
             output_var = Variable(output)
-            tmp1 = conv_enc(output_var)
 
+            # cross-correlation vector == tmp1
+            tmp1 = conv_enc(output_var)   # [1, 512, 32, 32] -> conv -> [1, 772, 32, 32]
 
+            
             maxcoor = MaxCoord()
-
+            
+            # ind -> ch , vmax -> value
             kbar, ind, vmax = maxcoor.update_output(tmp1.data, sp_x, sp_y)
-            real_patches = kbar.size(1) + torch.sum(ctx.flag)
+            
+            real_patches = kbar.size(1)
+            
+            
             vamx_mask=vmax.index_select(0,mask_point_idx)
             _, _, kbar_h, kbar_w = kbar.size()
             out_new = unknown_patch.clone()
@@ -65,22 +77,30 @@ class CSAFunction(torch.autograd.Function):
 
             kbar = ctx.Tensor(1, real_patches, kbar_h, kbar_w).zero_()
             ind_laten=0
+            
+            # Dmax, Dad
             for i in range(kbar_h):
                 for j in range(kbar_w):
-                    indx = i*kbar_w + j
-                    check=torch.eq(mask_point_idx, indx )
-                    non_r_ch = ind[indx]
-                    offset = ctx.flatten_offsets[non_r_ch]
+                    indx = i*kbar_w + j                     # 1024
+                    check=torch.eq(mask_point_idx, indx )   # equal, if available -> 1
+                    non_r_ch = ind[indx]                    # 
+                    
+#                     offset = ctx.flatten_offsets[non_r_ch]  # index -> mask patch count
+#                     correct_ch = int(non_r_ch + offset)     # 
 
-                    correct_ch = int(non_r_ch + offset)
-                    if(check.sum()>=1):
-                        known_region=known_patch[non_r_ch]
+                    correct_ch = int(non_r_ch)
+                    
+                    if(check.sum()>=1):                      # if mask ?
+                        known_region=known_patch[non_r_ch]          # correlation max channel index == non_r_ch
                         unknown_region=unknown_patch[ind_laten]
 
+                        # first patch -> copy
                         if ind_laten==0:
                             out_new[ind_laten]=known_region
                             in_attention[ind_laten,correct_ch]=1
                             kbar[:, :, i, j] = torch.unsqueeze(in_attention[ind_laten], 0)
+                        
+                        # not first -> calculate -> paper
                         elif ind_laten!=0:
                             little_value = unknown_region.clone()
                             ininconv = out_new[ind_laten - 1].clone()
@@ -155,4 +175,4 @@ class CSAFunction(torch.autograd.Function):
         # note the input channel and the output channel are all c, as no mask input for now.
         grad_input =grad_swapped_all
 
-        return grad_input, None, None, None, None, None, None, None, None, None, None
+        return grad_input, None, None, None, None, None, None, None, None, None, None, None

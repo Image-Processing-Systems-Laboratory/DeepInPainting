@@ -12,6 +12,8 @@ class BaseModel():
         self.isTrain = opt.isTrain
         self.Tensor = torch.cuda.FloatTensor if self.gpu_ids else torch.Tensor
         self.save_dir = os.path.join(opt.checkpoints_dir, opt.name)
+        if os.path.exists(self.save_dir) is False:
+            os.makedirs(self.save_dir)
 
     def set_input(self, input):
         self.input = input
@@ -41,16 +43,23 @@ class BaseModel():
     def save_network(self, network, network_label, epoch_label, gpu_ids):
         if os.path.exists( self.save_dir ) is False:
             os.makedirs( self.save_dir)
-        save_filename = '%s_net_%s.pth' % (epoch_label, network_label)
+        save_filename = '%s_net_%s.pt' % (epoch_label, network_label)
         save_path = os.path.join(self.save_dir, save_filename)
-
+        
+ 
+        #torch.jit.save(torch.jit.script(network),save_path)
+        
+        #rand_input=torch.rand(1,6,256,256).cuda()
+        #traced_net=torch.jit.trace(torch.jit.script(network),rand_input)
+        #traced_net.save(save_path)
+        
         torch.save(network.cpu().state_dict(), save_path)
         if len(gpu_ids) and torch.cuda.is_available():
             network.cuda(gpu_ids[0])
 
     # helper loading function that can be used by subclasses
     def load_network(self, network, network_label, epoch_label):
-        save_filename = '%s_net_%s.pth' % (epoch_label, network_label)
+        save_filename = '%s_net_%s.pt' % (epoch_label, network_label)
         save_path = os.path.join(self.save_dir, save_filename)
         network.load_state_dict(torch.load(save_path))
     # update learning rate (called once every epoch)

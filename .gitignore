@@ -1,0 +1,17 @@
+*.tar
+/paris_original
+/paris_original2
+/paris_original_ref
+/paris_original_test
+/paris_validation
+/paris_validation_ref
+/result
+/saveimg
+/mask
+/checkpoints
+/test*
+*.pt
+*__pycache__*
+.ipynb_*
+.\\check*
+

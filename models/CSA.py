@@ -9,6 +9,7 @@ from .base_model import BaseModel
 from . import networks
 from .vgg16 import Vgg16
 
+
 class CSA(BaseModel):
     def name(self):
         return 'CSAModel'
@@ -22,13 +23,17 @@ class CSA(BaseModel):
 
         self.vgg=Vgg16(requires_grad=False)
         self.vgg=self.vgg.cuda()
+        
         self.input_A = self.Tensor(opt.batchSize, opt.input_nc,
                                    opt.fineSize, opt.fineSize)
         self.input_B = self.Tensor(opt.batchSize, opt.output_nc,
                                    opt.fineSize, opt.fineSize)
+        # define ref size
+        self.input_ref = self.Tensor(opt.batchSize, opt.output_nc,
+                                   opt.fineSize, opt.fineSize)
 
         # batchsize should be 1 for mask_global
-        self.mask_global = torch.ByteTensor(1, 1, opt.fineSize, opt.fineSize)
+        self.mask_global = torch.BoolTensor(1, 1, opt.fineSize, opt.fineSize)
 
 
         self.mask_global.zero_()
@@ -41,11 +46,15 @@ class CSA(BaseModel):
         if len(opt.gpu_ids) > 0:
             self.use_gpu = True
             self.mask_global = self.mask_global.cuda()
-
+        
+        # refinement
         self.netG,self.Cosis_list,self.Cosis_list2, self.CSA_model= networks.define_G(opt.input_nc_g, opt.output_nc, opt.ngf,
                                       opt.which_model_netG, opt, self.mask_global, opt.norm, opt.use_dropout, opt.init_type, self.gpu_ids, opt.init_gain)
+        # rough
         self.netP,_,_,_=networks.define_G(opt.input_nc, opt.output_nc, opt.ngf,
                                     opt.which_model_netP, opt, self.mask_global, opt.norm, opt.use_dropout, opt.init_type, self.gpu_ids, opt.init_gain)
+        
+        # discriminator
         if self.isTrain:
             use_sigmoid = False
             if opt.gan_type == 'vanilla':
@@ -57,7 +66,8 @@ class CSA(BaseModel):
             self.netF = networks.define_D(opt.input_nc, opt.ndf,
                                           opt.which_model_netF,
                                           opt.n_layers_D, opt.norm, use_sigmoid, opt.init_type, self.gpu_ids,
-                                          opt.init_gain)            
+                                          opt.init_gain) 
+        
         if not self.isTrain or opt.continue_train:
             print('Loading pre-trained network!')
             self.load_network(self.netG, 'G', opt.which_epoch)
@@ -65,12 +75,13 @@ class CSA(BaseModel):
             if self.isTrain:
                 self.load_network(self.netD, 'D', opt.which_epoch)
                 self.load_network(self.netF, 'F', opt.which_epoch)
-
+        self.criterionGAN = networks.GANLoss(gan_type=opt.gan_type, tensor=self.Tensor)
+        self.criterionL1 = torch.nn.L1Loss()
+        
+        # loss 
         if self.isTrain:
             self.old_lr = opt.lr
             # define loss functions
-            self.criterionGAN = networks.GANLoss(gan_type=opt.gan_type, tensor=self.Tensor)
-            self.criterionL1 = torch.nn.L1Loss()
 
             # initialize optimizers
             self.schedulers = []
@@ -98,14 +109,27 @@ class CSA(BaseModel):
                 networks.print_network(self.netF)
             print('-----------------------------------------------')
 
-    def set_input(self,input,mask):
+    # training
+    def set_isTrain(self):
+        self.isTrain = True
+    
+    # validation
+    def set_isVal(self):
+        self.isTrain = False
+            
+    def set_input(self, input, mask, ref):
 
-        input_A = input
-        input_B = input.clone()
-        input_mask=mask
-
+        input_A = input  # Ground Truth(For masking)
+        input_B = input  # Ground Truth(For L1 loss)
+        
+        input_mask = mask  # Mask
+                
+        input_ref = ref  # Augmented Image
+        
         self.input_A.resize_(input_A.size()).copy_(input_A)
         self.input_B.resize_(input_B.size()).copy_(input_B)
+        
+        self.input_ref.resize_(input_ref.size()).copy_(input_ref)
 
         self.image_paths = 0
 
@@ -120,10 +144,10 @@ class CSA(BaseModel):
 
         self.ex_mask = self.mask_global.expand(1, 3, self.mask_global.size(2), self.mask_global.size(3)) # 1*c*h*w
 
-        self.inv_ex_mask = torch.add(torch.neg(self.ex_mask.float()), 1).byte()
-        self.input_A.narrow(1,0,1).masked_fill_(self.mask_global, 2*123.0/255.0 - 1.0)
-        self.input_A.narrow(1,1,1).masked_fill_(self.mask_global, 2*104.0/255.0 - 1.0)
-        self.input_A.narrow(1,2,1).masked_fill_(self.mask_global, 2*117.0/255.0 - 1.0)
+        self.inv_ex_mask = torch.add(torch.neg(self.ex_mask.float()), 1).bool()
+        self.input_A.narrow(1,0,1).masked_fill_(self.mask_global, 2*123.0/255.0 - 1.0)   # -0.03
+        self.input_A.narrow(1,1,1).masked_fill_(self.mask_global, 2*104.0/255.0 - 1.0)   # -0.18
+        self.input_A.narrow(1,2,1).masked_fill_(self.mask_global, 2*117.0/255.0 - 1.0)   # -0.08
 
         self.set_latent_mask(self.mask_global, 3, self.opt.threshold)
 
@@ -132,17 +156,33 @@ class CSA(BaseModel):
         self.CSA_model[0].set_mask(mask_global, layer_to_last, threshold)
         self.Cosis_list[0].set_mask(mask_global, self.opt)
         self.Cosis_list2[0].set_mask(mask_global, self.opt)
+        
+    
+    # training
+    def set_ref_latent(self):
+        self.ref_latent=self.vgg(Variable(self.input_ref,requires_grad=False))
+        self.CSA_model[0].set_ref(self.ref_latent)
+        
+        
+    # propagation init
     def forward(self):
         self.real_A =self.input_A.to(self.device)
         self.fake_P= self.netP(self.real_A)
+
         self.un=self.fake_P.clone()
         self.Unknowregion=self.un.data.masked_fill_(self.inv_ex_mask, 0)
         self.knownregion=self.real_A.data.masked_fill_(self.ex_mask, 0)
         self.Syn=self.Unknowregion+self.knownregion
         self.Middle=torch.cat((self.Syn,self.input_A),1)
+        
+        # refinement
         self.fake_B = self.netG(self.Middle)
-        self.real_B = self.input_B.to(self.device)
 
+        self.real_B = self.input_B.to(self.device)
+        self.real_Ref = self.input_ref.to(self.device)
+        
+        
+    # consistency loss
     def set_gt_latent(self):
         gt_latent=self.vgg(Variable(self.input_B,requires_grad=False))
         self.Cosis_list[0].set_target(gt_latent.relu4_3)
@@ -159,9 +199,13 @@ class CSA(BaseModel):
         self.Middle=torch.cat((self.Syn,self.input_A),1)
         self.fake_B = self.netG(self.Middle)
         self.real_B = self.input_B.to(self.device)
-
-
-
+        self.real_Ref = self.input_ref.to(self.device)
+        self.loss_IPSR=self.criterionGAN(self.real_B,self.fake_B,False)
+               
+    def get_loss(self):
+        self.loss_valid =( self.criterionL1(self.fake_B, self.real_B) +self.criterionL1(self.fake_P, self.real_B) )* self.opt.lambda_A
+        return OrderedDict([('GAN', self.loss_valid.data.item())])
+    
     def backward_D(self):
         fake_AB = self.fake_B
         # Real
@@ -180,7 +224,7 @@ class CSA(BaseModel):
         self.pred_real_F = self.netF(self.gt_latent_real.relu3_3)
         self.loss_F_fake = self.criterionGAN(self.pred_fake_F,self.pred_real_F, True)
 
-        self.loss_D =self.loss_D_fake * 0.5 + self.loss_F_fake  * 0.5
+        self.loss_D = self.loss_D_fake * 0.5 + self.loss_F_fake  * 0.5
 
         # When two losses are ready, together backward.
         # It is op, so the backward will be called from a leaf.(quite different from LuaTorch)
@@ -246,9 +290,12 @@ class CSA(BaseModel):
         real_A =self.real_A.data
         fake_B = self.fake_B.data
         real_B =self.real_B.data
+        real_Ref = self.real_Ref.data
+        fake_P =self.fake_P.data
+        return real_A,real_Ref,fake_B,fake_P,real_B
 
-        return real_A,real_B,fake_B
-
+    def get_error(self):
+        return self.loss_IPSR
 
     def save(self, epoch):
         self.save_network(self.netG, 'G', epoch, self.gpu_ids)

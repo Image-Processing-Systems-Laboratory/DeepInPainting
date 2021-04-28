@@ -6,35 +6,42 @@ import torch.nn as nn
 from torch.autograd import Variable
 
 class NonparametricShift(object):
+    # inpatch.squeeze(), false, false ,///
     def buildAutoencoder(self, target_img, normalize, interpolate,  nonmask_point_idx, mask_point_idx, patch_size=1, stride=1):
         nDim = 3
         assert target_img.dim() == nDim, 'target image must be of dimension 3.'
-        C = target_img.size(0)
+        C = target_img.size(0)   # 512
 
         self.Tensor = torch.cuda.FloatTensor if torch.cuda.is_available else torch.Tensor
 
-        patches_all, patches_part, patches_mask= self._extract_patches(target_img, patch_size, stride, nonmask_point_idx,mask_point_idx)
+        # [1024, 512, 1, 1], [1024, 512, 1, 1], [252, 512, 1, 1]
+        patches_all, patches_part, patches_mask= self._extract_patches(target_img, patch_size, stride, nonmask_point_idx, mask_point_idx)
 
         #相当于个数 patch的个数
-        npatches_part = patches_part.size(0)
-        npatches_all = patches_all.size(0)
-        npatches_mask=patches_mask.size(0)
-
+        npatches_part = patches_part.size(0)  # [1024, 512, 1, 1] -> size(0) -> 772
+        npatches_all = patches_all.size(0)    # 1024
+        npatches_mask=patches_mask.size(0)    # 252
+        
+        # M- -> as conv filter
         conv_enc_non_mask, conv_dec_non_mask = self._build(patch_size, stride, C, patches_part, npatches_part, normalize, interpolate)
 
+        # M + M-
         conv_enc_all, conv_dec_all = self._build(patch_size, stride, C, patches_all, npatches_all, normalize, interpolate)
 
 
 
         return conv_enc_all, conv_enc_non_mask, conv_dec_all, conv_dec_non_mask ,patches_part, patches_mask
 
+    # get cross-correlation
     def _build(self, patch_size, stride, C, target_patches, npatches, normalize, interpolate):
         # for each patch, divide by its L2 norm.
         enc_patches = target_patches.clone()
         for i in range(npatches):
             enc_patches[i] = enc_patches[i]*(1/(enc_patches[i].norm(2)+1e-8))
 
+        # [1x1 conv2d] 
         conv_enc = nn.Conv2d(C, npatches, kernel_size=patch_size, stride=stride, bias=False)
+
         conv_enc.weight.data = enc_patches
 
         # normalize is not needed, it doesn't change the result!
@@ -64,6 +71,7 @@ class NonparametricShift(object):
         patches = input_windows.index_select(0, nonmask_point_idx) #It returns a new tensor, representing patches extracted from non-masked region!
         maskpatches = input_windows.index_select(0,mask_point_idx)
         return patches_all, patches,maskpatches
+    
     def _extract_patches_mask(self, img, patch_size, stride, nonmask_point_idx, mask_point_idx):
         n_dim = 3
         assert img.dim() == n_dim, 'image must be of dimension 3.'
