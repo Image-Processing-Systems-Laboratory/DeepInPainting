@@ -29,8 +29,6 @@ def diagnose_network(net, name='network'):
             count += 1
     if count > 0:
         mean = mean / count
-    print(name)
-    print(mean)
 
 def binary_mask(in_mask, threshold):
     assert in_mask.dim() == 2, "mask must be 2 dimensions"
@@ -66,6 +64,7 @@ def create_gMask(gMask_opts):
 # inMask is tensor should be 1*1*256*256 float
 # Return: ByteTensor
 
+# get feature of mask
 def cal_feat_mask(inMask, conv_layers, threshold):
     assert inMask.dim() == 4, "mask must be 4 dimensions"
     assert inMask.size(0) == 1, "the first dimension must be 1 for mask"
@@ -85,64 +84,80 @@ def cal_feat_mask(inMask, conv_layers, threshold):
     return output.detach().byte()
 
 
+# index
 def cal_mask_given_mask_thred(img, mask, patch_size, stride, mask_thred):
     assert img.dim() == 3, 'img has to be 3 dimenison!'
     assert mask.dim() == 2, 'mask has to be 2 dimenison!'
     dim = img.dim()
 
-    _, H, W = img.size(dim-3), img.size(dim-2), img.size(dim-1)
-    nH = int(math.floor((H-patch_size)/stride + 1))
-    nW = int(math.floor((W-patch_size)/stride + 1))
-    N = nH*nW
+    _, H, W = img.size(dim-3), img.size(dim-2), img.size(dim-1)   # c x 32 x 32
+    
+    nH = int(math.floor((H-patch_size)/stride + 1))  # 
+    nW = int(math.floor((W-patch_size)/stride + 1))  # 
+    
+    N = nH*nW    # 32x32 -> 1024
 
-    flag = torch.zeros(N).long()
-    offsets_tmp_vec = torch.zeros(N).long()
+    flag = torch.zeros(N).long()    # flag == 1 -> unknown region
+    offsets_tmp_vec = torch.zeros(N).long()  # 
 
 
-    nonmask_point_idx_all = torch.zeros(N).long()
+    nonmask_point_idx_all = torch.zeros(N).long()   # nonmask 32x32
 
     tmp_non_mask_idx = 0
 
 
-    mask_point_idx_all = torch.zeros(N).long()
+    mask_point_idx_all = torch.zeros(N).long()      # mask 32x32
 
     tmp_mask_idx = 0
 
     for i in range(N):
-        h = int(math.floor(i/nW))
-        w = int(math.floor(i%nW))
+        h = int(math.floor(i/nW))    # 1D -> 2D
+        w = int(math.floor(i%nW))    # 1D -> 2D
 
         mask_tmp = mask[h*stride:h*stride + patch_size,
-                        w*stride:w*stride + patch_size]
+                        w*stride:w*stride + patch_size]    # patch size = 1 -> 1 by 1
 
-
-        if torch.sum(mask_tmp) < mask_thred:
-            nonmask_point_idx_all[tmp_non_mask_idx] = i
-            tmp_non_mask_idx += 1
-        else:
-            mask_point_idx_all[tmp_mask_idx] = i
-            tmp_mask_idx += 1
-            flag[i] = 1
+        
+#         # determine whether mask or not
+#         if torch.sum(mask_tmp) < mask_thred:    # mask_thread = 5/16
+#             nonmask_point_idx_all[tmp_non_mask_idx] = i     # nonmask_point_idx_all = non_mask location
+#             tmp_non_mask_idx += 1                           # tmp_non_maks_idx = non_mask count
+#         else:
+#             mask_point_idx_all[tmp_mask_idx] = i            # mask_location
+#             tmp_mask_idx += 1                               # mask count
+#             flag[i] = 1                                     # flag == 0,1 mask 1-> mask, 0->nonmask
+#             offsets_tmp_vec[i] = -1   
+    
+        # get mask region
+        if torch.sum(mask_tmp) >= mask_thred:
+            mask_point_idx_all[tmp_mask_idx] = i            # mask_location
+            tmp_mask_idx += 1                               # mask count
+            flag[i] = 1                                     # flag == 0,1 mask 1-> mask, 0->nonmask
             offsets_tmp_vec[i] = -1
+        # non-mask region -> ref == 1024
+        nonmask_point_idx_all[tmp_non_mask_idx] = i
+        tmp_non_mask_idx += 1   # 1024
+    
 
 
     non_mask_num = tmp_non_mask_idx
     mask_num = tmp_mask_idx
 
-    nonmask_point_idx = nonmask_point_idx_all.narrow(0, 0, non_mask_num)
-    mask_point_idx=mask_point_idx_all.narrow(0, 0, mask_num)
+    nonmask_point_idx = nonmask_point_idx_all.narrow(0, 0, non_mask_num)  # [1, 2, 3, 4, 5, 6, 7.. 10]
+    mask_point_idx=mask_point_idx_all.narrow(0, 0, mask_num)              # [2, 4, 7, 8, 9]
 
-    # get flatten_offsets
-    flatten_offsets_all = torch.LongTensor(N).zero_()
+    # get flatten_offsets, N == 1024
+    flatten_offsets_all = torch.LongTensor(N).zero_()     # ack mask count
     for i in range(N):
         offset_value = torch.sum(offsets_tmp_vec[0:i+1])
         if flag[i] == 1:
             offset_value = offset_value + 1
         flatten_offsets_all[i+offset_value] = -offset_value
 
-    flatten_offsets = flatten_offsets_all.narrow(0, 0, non_mask_num)
+    flatten_offsets = flatten_offsets_all.narrow(0, 0, non_mask_num)   # 772 <- value?
 
-
+    
+    # flag -> [0, 0, ... 1, 1, 1,... 0, 0] ,  nonmask -> [0,1, .... // .. 1023, 1024], mask_point_idx -> [256, 257, ...], 
     return flag, nonmask_point_idx, flatten_offsets, mask_point_idx
 
 

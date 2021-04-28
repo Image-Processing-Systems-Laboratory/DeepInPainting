@@ -19,9 +19,7 @@ class MaxCoord():
         assert input.size(0) == 1, "The first dimension of input has to be 1!"
 #同样大小 并且为0的tensor
         output = torch.zeros_like(input)
-
         v_max,c_max = torch.max(input, 1)
-
         c_max_flatten = c_max.view(-1)
         v_max_flatten = v_max.view(-1)
        # output[:, c_max_flatten, sp_x, sp_y] = 1
