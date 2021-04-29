@@ -50,7 +50,7 @@ class Opion():
         self.continue_train=False
         self.epoch_count=1
         self.phase='train'
-        self.which_epoch=34
+        self.which_epoch=46
         self.niter=20
         self.niter_decay=100
         self.beta1=0.5
@@ -79,7 +79,7 @@ app = Flask(__name__)
 opt = Opion()
 model = create_model(opt)
 
-load_epoch=34
+load_epoch=46
 model.load(load_epoch)
 cnt=1
 
@@ -151,9 +151,9 @@ def get_image():
 			model.set_ref_latent()
 			model.set_gt_latent()
 			model.test()
-			real_A,real_B,fake_B,fake_P=model.get_current_visuals()
-			pic = ((torch.cat([real_A,real_B,fake_B,fake_P], dim=0) + 1) / 2.0)
-			# pic = ((torch.cat([fake_B], dim=0) + 1) / 2.0)
+			real_A,ref_B,fake_B,fake_P,real_B=model.get_current_visuals()
+			# pic = ((torch.cat([real_A,ref_B,fake_B,fake_P], dim=0) + 1) / 2.0)
+			pic = ((torch.cat([fake_B], dim=0) + 1) / 2.0)
 			torchvision.utils.save_image(pic, r'/home/jara/DeepInPainting_3/static/img/test.jpg')
 	return redirect(url_for('showResult'))
 
