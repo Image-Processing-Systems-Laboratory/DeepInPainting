@@ -95,6 +95,9 @@
 
     // formData submit, Todo: data rgba -> rgb black 
     async function sendReq() {
+      //canvas = document.getElementById("binaryMask");
+      //context = canvas.getContext("2d");
+      //context.globalAlpha=1
       let maskBlob = await new Promise(resolve => binaryMask.toBlob(resolve, 'image/png'));
       let srcImage = document.getElementById("originalImage");
       let refImage = document.getElementById("referenceImage");

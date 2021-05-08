@@ -148,6 +148,9 @@ def get_image():
 			mask=torch.unsqueeze(mask,1)
 			mask=mask.bool()
 
+			#pic1 = ((torch.cat([mask], dim=0) + 1) / 2.0)
+			#torchvision.utils.save_image(pic1, r'/home/jara/DeepInPainting_3/result/test.jpg')
+			
 			model.set_input(image,mask,ref) # it not only sets the input data with mask, but also sets the latent mask.
 			model.set_ref_latent()
 			model.set_gt_latent()
