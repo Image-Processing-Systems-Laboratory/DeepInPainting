@@ -46,12 +46,17 @@ class BaseModel():
         save_filename = '%s_net_%s.pt' % (epoch_label, network_label)
         save_path = os.path.join(self.save_dir, save_filename)
         
- 
-        #torch.jit.save(torch.jit.script(network),save_path)
+#         print(save_path)
         
-        #rand_input=torch.rand(1,6,256,256).cuda()
-        #traced_net=torch.jit.trace(torch.jit.script(network),rand_input)
-        #traced_net.save(save_path)
+        #         m = torch.jit.script(network)
+
+        #         torch.jit.save(m, save_path)
+    
+        # torch.jit.save(torch.jit.script(network),save_path)
+        
+#         rand_input=torch.rand(1,6,256,256).cuda()
+#         traced_net=torch.jit.trace(network, rand_input)
+#         traced_net.save(save_path)
         
         torch.save(network.cpu().state_dict(), save_path)
         if len(gpu_ids) and torch.cuda.is_available():
@@ -62,6 +67,7 @@ class BaseModel():
         save_filename = '%s_net_%s.pt' % (epoch_label, network_label)
         save_path = os.path.join(self.save_dir, save_filename)
         network.load_state_dict(torch.load(save_path))
+        
     # update learning rate (called once every epoch)
     def update_learning_rate(self):
         for scheduler in self.schedulers:

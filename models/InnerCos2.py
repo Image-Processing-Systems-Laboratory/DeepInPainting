@@ -30,7 +30,7 @@ class InnerCos2(nn.Module):
 
     def get_target(self):
         return self.target
-
+    
     def forward(self, in_data):
         if not self.skip:
 

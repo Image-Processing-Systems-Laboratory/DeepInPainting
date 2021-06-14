@@ -16,7 +16,6 @@ from .InnerCos2 import InnerCos2
 # Functions
 ###############################################################################
 
-
 def get_norm_layer(norm_type='instance'):
     if norm_type == 'batch':
         norm_layer = functools.partial(nn.BatchNorm2d, affine=True)
@@ -87,10 +86,8 @@ def define_G(input_nc, output_nc, ngf, which_model_netG, opt, mask_global, norm=
     cosis_list = []
     cosis_list2 = []
     csa_model = []
-    # rough
     if which_model_netG == 'unet_256':
         netG = UnetGenerator(input_nc, output_nc, 8, ngf, norm_layer=norm_layer, use_dropout=use_dropout)
-    # refinement
     elif which_model_netG == 'unet_csa':
         netG = UnetGeneratorCSA(input_nc, output_nc, 8, opt, mask_global, csa_model,cosis_list, cosis_list2,ngf, norm_layer=norm_layer, use_dropout=use_dropout)
     else:
@@ -183,7 +180,7 @@ class GANLoss(nn.Module):
             return errG
 
 
-# refinement
+
 class UnetGeneratorCSA(nn.Module):
     def __init__(self, input_nc, output_nc,  num_downs, opt, mask_global, csa_model,cosis_list ,cosis_list2,ngf=64,
                  norm_layer=nn.BatchNorm2d, use_dropout=False):
@@ -195,10 +192,7 @@ class UnetGeneratorCSA(nn.Module):
         for i in range(num_downs - 5):  # The innner layers number is 3 (sptial size:512*512), if unet_256.
             unet_block = UnetSkipConnectionBlock_3(ngf * 8, ngf * 8, input_nc=None, submodule=unet_block, norm_layer=norm_layer, use_dropout=use_dropout)
         unet_block = UnetSkipConnectionBlock_3(ngf * 8, ngf * 8, input_nc=None,submodule=unet_block, norm_layer=norm_layer, use_dropout=use_dropout)
-        
-        # csa layer
         unet_csa = CSA(ngf * 4, ngf * 8, opt, csa_model,cosis_list ,cosis_list2,mask_global, input_nc=None, submodule=unet_block, norm_layer=norm_layer)
-        
         unet_block = UnetSkipConnectionBlock_3(ngf * 2, ngf * 4, input_nc=None,submodule=unet_csa, norm_layer=norm_layer)
         unet_block = UnetSkipConnectionBlock_3(ngf, ngf * 2,input_nc=None, submodule=unet_block, norm_layer=norm_layer)
         unet_block = UnetSkipConnectionBlock_3(output_nc, ngf,input_nc=input_nc, submodule=unet_block, outermost=True, norm_layer=norm_layer)
@@ -277,7 +271,7 @@ class UnetSkipConnectionBlock_3(nn.Module):
                 x_latter = F.upsample(x_latter, (h, w), mode='bilinear')
             return torch.cat([x_latter, x], 1)  # cat in the C channel
 
-# csa layer
+
 class CSA(nn.Module):
     def __init__(self, outer_nc, inner_nc, opt,csa_model,cosis_list, cosis_list2,mask_global, input_nc, \
                  submodule=None,  outermost=False, innermost=False, norm_layer=nn.BatchNorm2d,
@@ -303,17 +297,13 @@ class CSA(nn.Module):
         uprelu = nn.ReLU(True)
         upnorm = norm_layer(outer_nc, affine=True)
 
-        # csa layer
-        csa= CSA_model(opt.threshold, opt.fixed_mask, opt.shift_sz, opt.stride, opt.mask_thred, opt.triple_weight)      # constructor
+        csa= CSA_model(opt.threshold, opt.fixed_mask, opt.shift_sz, opt.stride, opt.mask_thred, opt.triple_weight)
         csa.set_mask(mask_global, 3, opt.threshold)
-        csa_model.append(csa)   # ???
-        
-        # downsampling
+        csa_model.append(csa)
         innerCos = InnerCos(strength=opt.strength, skip=opt.skip)
         innerCos.set_mask(mask_global, opt)  # Here we need to set mask for innerCos layer too.
         cosis_list.append(innerCos)
-        
-        # upsampling
+
         innerCos2 = InnerCos2(strength=opt.strength, skip=opt.skip)
         innerCos2.set_mask(mask_global, opt)  # Here we need to set mask for innerCos layer too.
         cosis_list2.append(innerCos2)
@@ -355,7 +345,6 @@ class CSA(nn.Module):
 
         self.model = nn.Sequential(*model)
 
-    # x == Middle
     def forward(self, x):
         if self.outermost:  # if it is the outermost, directly pass the input in.
             return self.model(x)
@@ -504,6 +493,7 @@ class NLayerDiscriminator(nn.Module):
         return self.model(input)
 class PFDiscriminator(nn.Module):
     def __init__(self):
+
        super(PFDiscriminator, self).__init__()
 
 
