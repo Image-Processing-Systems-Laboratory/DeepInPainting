@@ -1,2 +1,2 @@
 # DeepInPainting
-level2(ipsr)
+level2(ipsr)_remove_discriminator
