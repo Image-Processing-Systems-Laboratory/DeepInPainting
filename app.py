@@ -14,13 +14,13 @@ class Opion():
         self.which_model_netD='basic' # patch discriminator
         
         self.which_model_netF='feature'# feature patch discriminator
-        self.which_model_netG='unet_csa'# seconde stage network
+        self.which_model_netG='unet_ipsr'# second stage network
         self.which_model_netP='unet_256'# first stage network
         self.triple_weight=1
-        self.name='CSA_inpainting'
+        self.name='IPSR_inpainting'
         self.n_layers_D='3' # network depth
         self.gpu_ids=[0]
-        self.model='csa_net'
+        self.model='ipsr_net'
         self.checkpoints_dir=r'/home/jara/DeepInPainting_3/checkpoints' #
         self.norm='instance'
         self.fixed_mask=1
