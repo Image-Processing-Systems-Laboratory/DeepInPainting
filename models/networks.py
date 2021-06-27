@@ -8,7 +8,7 @@ import functools
 import torch.nn.functional as F
 from torch.optim import lr_scheduler
 
-from .CSA_model import CSA_model
+from .IPSR_model import IPSR_model
 from .InnerCos import InnerCos
 from .InnerCos2 import InnerCos2
 
@@ -51,7 +51,7 @@ def init_weights(net, init_type='normal', gain=0.02):
         classname = m.__class__.__name__
         if hasattr(m, 'weight') and (classname.find('Conv') != -1 or classname.find('Linear') != -1):
             if init_type == 'normal':
-                init.normal(m.weight.data, 0.0, gain)
+                init.normal_(m.weight.data, 0.0, gain)
             elif init_type == 'xavier':
                 init.xavier_normal(m.weight.data, gain=gain)
             elif init_type == 'kaiming':
@@ -61,10 +61,10 @@ def init_weights(net, init_type='normal', gain=0.02):
             else:
                 raise NotImplementedError('initialization method [%s] is not implemented' % init_type)
             if hasattr(m, 'bias') and m.bias is not None:
-                init.constant(m.bias.data, 0.0)
+                init.constant_(m.bias.data, 0.0)
         elif classname.find('BatchNorm2d') != -1:
-            init.normal(m.weight.data, 1.0, gain)
-            init.constant(m.bias.data, 0.0)
+            init.normal_(m.weight.data, 1.0, gain)
+            init.constant_(m.bias.data, 0.0)
 
     print('initialize network with %s' % init_type)
     net.apply(init_func)
@@ -86,13 +86,13 @@ def define_G(input_nc, output_nc, ngf, which_model_netG, opt, mask_global, norm=
 
     cosis_list = []
     cosis_list2 = []
-    csa_model = []
+    ipsr_model = []
     # rough
     if which_model_netG == 'unet_256':
         netG = UnetGenerator(input_nc, output_nc, 8, ngf, norm_layer=norm_layer, use_dropout=use_dropout)
     # refinement
-    elif which_model_netG == 'unet_csa':
-        netG = UnetGeneratorCSA(input_nc, output_nc, 8, opt, mask_global, csa_model,cosis_list, cosis_list2,ngf, norm_layer=norm_layer, use_dropout=use_dropout)
+    elif which_model_netG == 'unet_ipsr':
+        netG = UnetGeneratorIPSR(input_nc, output_nc, 8, opt, mask_global, ipsr_model,cosis_list, cosis_list2,ngf, norm_layer=norm_layer, use_dropout=use_dropout)
     else:
         raise NotImplementedError('Generator model name [%s] is not recognized' % which_model_netG)
  
@@ -100,7 +100,7 @@ def define_G(input_nc, output_nc, ngf, which_model_netG, opt, mask_global, norm=
 
 
 
-    return init_net(netG, init_type, init_gain, gpu_ids),cosis_list ,cosis_list2,csa_model
+    return init_net(netG, init_type, init_gain, gpu_ids),cosis_list ,cosis_list2,ipsr_model
 
 
 def define_D(input_nc, ndf, which_model_netD,
@@ -184,10 +184,10 @@ class GANLoss(nn.Module):
 
 
 # refinement
-class UnetGeneratorCSA(nn.Module):
-    def __init__(self, input_nc, output_nc,  num_downs, opt, mask_global, csa_model,cosis_list ,cosis_list2,ngf=64,
+class UnetGeneratorIPSR(nn.Module):
+    def __init__(self, input_nc, output_nc,  num_downs, opt, mask_global, ipsr_model,cosis_list ,cosis_list2,ngf=64,
                  norm_layer=nn.BatchNorm2d, use_dropout=False):
-        super(UnetGeneratorCSA, self).__init__()
+        super(UnetGeneratorIPSR, self).__init__()
 
         # construct unet structure
         unet_block = UnetSkipConnectionBlock_3(ngf * 8, ngf * 8,  input_nc=None, submodule=None, norm_layer=norm_layer, innermost=True)
@@ -196,10 +196,10 @@ class UnetGeneratorCSA(nn.Module):
             unet_block = UnetSkipConnectionBlock_3(ngf * 8, ngf * 8, input_nc=None, submodule=unet_block, norm_layer=norm_layer, use_dropout=use_dropout)
         unet_block = UnetSkipConnectionBlock_3(ngf * 8, ngf * 8, input_nc=None,submodule=unet_block, norm_layer=norm_layer, use_dropout=use_dropout)
         
-        # csa layer
-        unet_csa = CSA(ngf * 4, ngf * 8, opt, csa_model,cosis_list ,cosis_list2,mask_global, input_nc=None, submodule=unet_block, norm_layer=norm_layer)
+        # ipsr layer
+        unet_ipsr = IPSR(ngf * 4, ngf * 8, opt, ipsr_model,cosis_list ,cosis_list2,mask_global, input_nc=None, submodule=unet_block, norm_layer=norm_layer)
         
-        unet_block = UnetSkipConnectionBlock_3(ngf * 2, ngf * 4, input_nc=None,submodule=unet_csa, norm_layer=norm_layer)
+        unet_block = UnetSkipConnectionBlock_3(ngf * 2, ngf * 4, input_nc=None,submodule=unet_ipsr, norm_layer=norm_layer)
         unet_block = UnetSkipConnectionBlock_3(ngf, ngf * 2,input_nc=None, submodule=unet_block, norm_layer=norm_layer)
         unet_block = UnetSkipConnectionBlock_3(output_nc, ngf,input_nc=input_nc, submodule=unet_block, outermost=True, norm_layer=norm_layer)
 
@@ -277,12 +277,12 @@ class UnetSkipConnectionBlock_3(nn.Module):
                 x_latter = F.upsample(x_latter, (h, w), mode='bilinear')
             return torch.cat([x_latter, x], 1)  # cat in the C channel
 
-# csa layer
-class CSA(nn.Module):
-    def __init__(self, outer_nc, inner_nc, opt,csa_model,cosis_list, cosis_list2,mask_global, input_nc, \
+# ipsr layer
+class IPSR(nn.Module):
+    def __init__(self, outer_nc, inner_nc, opt,ipsr_model,cosis_list, cosis_list2,mask_global, input_nc, \
                  submodule=None,  outermost=False, innermost=False, norm_layer=nn.BatchNorm2d,
                  use_dropout=False):
-        super(CSA, self).__init__()
+        super(IPSR, self).__init__()
         self.outermost = outermost
 
 
@@ -303,10 +303,10 @@ class CSA(nn.Module):
         uprelu = nn.ReLU(True)
         upnorm = norm_layer(outer_nc, affine=True)
 
-        # csa layer
-        csa= CSA_model(opt.threshold, opt.fixed_mask, opt.shift_sz, opt.stride, opt.mask_thred, opt.triple_weight)      # constructor
-        csa.set_mask(mask_global, 3, opt.threshold)
-        csa_model.append(csa)   # ???
+        # ipsr layer
+        ipsr = IPSR_model(opt.threshold, opt.fixed_mask, opt.shift_sz, opt.stride, opt.mask_thred, opt.triple_weight)      # constructor
+        ipsr.set_mask(mask_global, 3, opt.threshold)
+        ipsr_model.append(ipsr)   # ???
         
         # downsampling
         innerCos = InnerCos(strength=opt.strength, skip=opt.skip)
@@ -322,7 +322,6 @@ class CSA(nn.Module):
         # Different position only has differences in `upconv`
         # for the outermost, the special is `tanh`
         if outermost:
-
             upconv_3 = nn.ConvTranspose2d(inner_nc * 2, outer_nc,
                                         kernel_size=3, stride=1,
                                         padding=1)
@@ -345,7 +344,7 @@ class CSA(nn.Module):
             upconv_3 = nn.ConvTranspose2d(inner_nc * 2, outer_nc,
                                         kernel_size=3, stride=1,
                                         padding=1)
-            down = [downrelu, downconv, downnorm,downrelu_3,downconv_3,csa,innerCos,downnorm_3]
+            down = [downrelu, downconv, downnorm,downrelu_3,downconv_3,ipsr,innerCos,downnorm_3]
             up = [innerCos2,uprelu_3,upconv_3,upnorm_3,uprelu, upconv, upnorm]
 
             if use_dropout:

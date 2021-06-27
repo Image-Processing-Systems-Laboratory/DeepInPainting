@@ -10,9 +10,9 @@ from . import networks
 from .vgg16 import Vgg16
 
 
-class CSA(BaseModel):
+class IPSR(BaseModel):
     def name(self):
-        return 'CSAModel'
+        return 'IPSRModel'
 
     def initialize(self, opt):
         BaseModel.initialize(self, opt)

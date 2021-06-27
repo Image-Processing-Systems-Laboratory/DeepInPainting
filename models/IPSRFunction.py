@@ -7,7 +7,7 @@ import torch
 
 
 from torch.autograd import Variable
-class CSAFunction(torch.autograd.Function):
+class IPSRFunction(torch.autograd.Function):
 
     @staticmethod
     def forward(ctx, input, mask, ref, shift_sz, stride, triple_w, flag, nonmask_point_idx, mask_point_idx ,flatten_offsets, sp_x, sp_y):

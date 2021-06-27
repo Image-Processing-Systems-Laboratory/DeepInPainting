@@ -2,14 +2,14 @@ import torch.nn as nn
 import torch
 from torch.autograd import Variable
 import util.util as util
-from .CSAFunction import CSAFunction
+from .IPSRFunction import IPSRFunction
 
 
 
-class CSA_model(nn.Module):
+class IPSR_model(nn.Module):
     # constructor
     def __init__(self, threshold, fixed_mask, shift_sz=1, stride=1, mask_thred=1, triple_weight=1):
-        super(CSA_model, self).__init__()
+        super(IPSR_model, self).__init__()
         #threshold=5/16
         #shift-sz=1
         #fixed_mask=1
@@ -58,7 +58,7 @@ class CSA_model(nn.Module):
 
         
         # input == rough output -> refinement -> feature  ,,, ref_latent
-        return CSAFunction.apply(input, self.mask, self.ref, self.shift_sz, self.stride, \
+        return IPSRFunction.apply(input, self.mask, self.ref, self.shift_sz, self.stride, \
                                                          self.triple_weight, self.flag, self.nonmask_point_idx, self.mask_point_idx, self.flatten_offsets,\
                                                         self.sp_x, self.sp_y)
 

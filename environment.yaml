@@ -1,4 +1,4 @@
-name: csa-inpainting
+name: ipsr-inpainting
 channels:
   - https://mirrors.ustc.edu.cn/anaconda/pkgs/free
   - https://mirrors.ustc.edu.cn/anaconda/pkgs/free/

@@ -2,9 +2,9 @@
 def create_model(opt):
     model = None
     print(opt.model)
-    if opt.model == 'csa_net':
-        from .CSA import CSA
-        model = CSA()
+    if opt.model == 'ipsr_net':
+        from .IPSR import IPSR
+        model = IPSR()
     else:
         raise ValueError("Model [%s] not recognized." % opt.model)
     model.initialize(opt)
