@@ -286,13 +286,12 @@ class CSA(BaseModel):
                             ])
 
     def get_current_visuals(self):
-
-        real_A =self.real_A.data
+        real_A = self.real_A.data
         fake_B = self.fake_B.data
-        real_B =self.real_B.data
+        real_B = self.real_B.data
         real_Ref = self.real_Ref.data
-        fake_P =self.fake_P.data
-        return real_A,real_Ref,fake_B,fake_P,real_B
+        fake_P = self.fake_P.data
+        return real_A, real_Ref, fake_B, fake_P, real_B
 
     def get_error(self):
         return self.loss_IPSR
