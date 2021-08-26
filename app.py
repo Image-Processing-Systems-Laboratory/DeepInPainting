@@ -68,7 +68,7 @@ import os
 import torchvision
 from torch.utils import data
 import torchvision.transforms as transforms
-from IQA_pytorch import SSIM
+#from IQA_pytorch import SSIM
 import numpy as np
 from flask import Flask, render_template, request, url_for, redirect
 from werkzeug import secure_filename
@@ -84,16 +84,14 @@ model.load(load_epoch)
 cnt=1
 
 image_path1=r'/home/jara/DeepInPainting_3/test1'
+#image_path2=r'/home/jara/download'
 image_path2=r'/home/jara/DeepInPainting_3/test2'
 image_path3=r'/home/jara/DeepInPainting_3/test3'
 
 @app.route("/") 
 def index():
-	return render_template('home.html')
-
-@app.route("/fileUpload") 
-def render_result():
-	return render_template('result.html')
+	# return render_template('home.html')
+	return render_template('index.html')	
 
 @app.route('/getImage',methods=['GET','POST'])
 def get_image():
@@ -109,16 +107,18 @@ def get_image():
 		if(os.path.isdir(image_path3)==True):	
 			shutil.rmtree(image_path3)
 			os.mkdir(image_path3)
+		
+		print(request.files)
 
-		f=request.files['file']
+		f=request.files['srcImage']
 		filename=secure_filename(f.filename)
 		f.save(os.path.join(image_path1,filename))
 
-		f=request.files['file2']
+		f=request.files['binaryMask']
 		filename=secure_filename(f.filename)
 		f.save(os.path.join(image_path2,filename))
 
-		f=request.files['file3']
+		f=request.files['refImage']
 		filename=secure_filename(f.filename)
 		f.save(os.path.join(image_path3,filename))
 
@@ -133,9 +133,10 @@ def get_image():
 		 transforms.ToTensor(),
 		 transforms.Normalize(mean=[0.5] * 3, std=[0.5] * 3)])
 		dataroot=r'/home/jara/DeepInPainting_3/test1'
+		#maskroot=r'/home/jara/download'
 		maskroot=r'/home/jara/DeepInPainting_3/test2'
 		refroot=r'/home/jara/DeepInPainting_3/test3'
-		dataset_test = Data_load(dataroot, maskroot,refroot, transform, transform_mask, transform)
+		dataset_test = Data_load(dataroot, maskroot, refroot, transform, transform_mask, transform)
 		iterator_test = (data.DataLoader(dataset_test, batch_size=opt.batchSize,shuffle=False))
 
 		# 3 pictures <- request parsing
@@ -147,6 +148,9 @@ def get_image():
 			mask=torch.unsqueeze(mask,1)
 			mask=mask.bool()
 
+			#pic1 = ((torch.cat([mask], dim=0) + 1) / 2.0)
+			#torchvision.utils.save_image(pic1, r'/home/jara/DeepInPainting_3/result/test.jpg')
+			
 			model.set_input(image,mask,ref) # it not only sets the input data with mask, but also sets the latent mask.
 			model.set_ref_latent()
 			model.set_gt_latent()
