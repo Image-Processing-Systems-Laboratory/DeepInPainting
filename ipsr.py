@@ -35,10 +35,8 @@ class IPSR(BaseModel):
         # batchsize should be 1 for mask_global
         self.mask_global = torch.BoolTensor(1, 1, opt.fineSize, opt.fineSize)
         self.mask_global.zero_()
-        self.mask_global[:, :, int(self.opt.fineSize / 4) + self.opt.overlap: int(self.opt.fineSize / 2) + int(
-            self.opt.fineSize / 4) - self.opt.overlap, \
-        int(self.opt.fineSize / 4) + self.opt.overlap: int(self.opt.fineSize / 2) + int(
-            self.opt.fineSize / 4) - self.opt.overlap] = 1
+        self.mask_global[:, :, int(self.opt.fineSize / 4) + self.opt.overlap: int(self.opt.fineSize / 2) + int(self.opt.fineSize / 4) - self.opt.overlap, \
+        int(self.opt.fineSize / 4) + self.opt.overlap: int(self.opt.fineSize / 2) + int(self.opt.fineSize / 4) - self.opt.overlap] = 1
         self.mask_type = opt.mask_type
         self.gMask_opts = {}
 
@@ -47,16 +45,9 @@ class IPSR(BaseModel):
             self.mask_global = self.mask_global.cuda()
 
         # refinement
-        self.netG, self.Cosis_list, self.Cosis_list2, self.IPSR_model = networks.define_G(opt.input_nc_g, opt.output_nc,
-                                                                                         opt.ngf,
-                                                                                         opt.which_model_netG, opt,
-                                                                                         self.mask_global, opt.norm,
-                                                                                         opt.use_dropout, opt.init_type,
-                                                                                         self.gpu_ids, opt.init_gain)
+        self.netG, self.Cosis_list, self.Cosis_list2, self.IPSR_model = networks.define_G(opt.input_nc_g, opt.output_nc, opt.ngf, opt.which_model_netG, opt, self.mask_global, opt.norm, opt.use_dropout, opt.init_type, self.gpu_ids, opt.init_gain)
         # rough
-        self.netP, _, _, _ = networks.define_G(opt.input_nc, opt.output_nc, opt.ngf,
-                                               opt.which_model_netP, opt, self.mask_global, opt.norm, opt.use_dropout,
-                                               opt.init_type, self.gpu_ids, opt.init_gain)
+        self.netP, _, _, _ = networks.define_G(opt.input_nc, opt.output_nc, opt.ngf, opt.which_model_netP, opt, self.mask_global, opt.norm, opt.use_dropout, opt.init_type, self.gpu_ids, opt.init_gain)
 
         # discriminator
         if self.isTrain:
@@ -64,14 +55,8 @@ class IPSR(BaseModel):
             if opt.gan_type == 'vanilla':
                 use_sigmoid = True  # only vanilla GAN using BCECriterion
 
-            self.netD = networks.define_D(opt.input_nc, opt.ndf,
-                                          opt.which_model_netD,
-                                          opt.n_layers_D, opt.norm, use_sigmoid, opt.init_type, self.gpu_ids,
-                                          opt.init_gain)
-            self.netF = networks.define_D(opt.input_nc, opt.ndf,
-                                          opt.which_model_netF,
-                                          opt.n_layers_D, opt.norm, use_sigmoid, opt.init_type, self.gpu_ids,
-                                          opt.init_gain)
+            self.netD = networks.define_D(opt.input_nc, opt.ndf, opt.which_model_netD, opt.n_layers_D, opt.norm, use_sigmoid, opt.init_type, self.gpu_ids, opt.init_gain)
+            self.netF = networks.define_D(opt.input_nc, opt.ndf, opt.which_model_netF, opt.n_layers_D, opt.norm, use_sigmoid, opt.init_type, self.gpu_ids, opt.init_gain)
 
         if not self.isTrain or opt.continue_train:
             print('Loading pre-trained network!')
@@ -91,14 +76,10 @@ class IPSR(BaseModel):
             # initialize optimizers
             self.schedulers = []
             self.optimizers = []
-            self.optimizer_G = torch.optim.Adam(self.netG.parameters(),
-                                                lr=opt.lr, betas=(opt.beta1, 0.999))
-            self.optimizer_P = torch.optim.Adam(self.netP.parameters(),
-                                                lr=opt.lr, betas=(opt.beta1, 0.999))
-            self.optimizer_D = torch.optim.Adam(self.netD.parameters(),
-                                                lr=opt.lr, betas=(opt.beta1, 0.999))
-            self.optimizer_F = torch.optim.Adam(self.netF.parameters(),
-                                                lr=opt.lr, betas=(opt.beta1, 0.999))
+            self.optimizer_G = torch.optim.Adam(self.netG.parameters(), lr=opt.lr, betas=(opt.beta1, 0.999))
+            self.optimizer_P = torch.optim.Adam(self.netP.parameters(), lr=opt.lr, betas=(opt.beta1, 0.999))
+            self.optimizer_D = torch.optim.Adam(self.netD.parameters(), lr=opt.lr, betas=(opt.beta1, 0.999))
+            self.optimizer_F = torch.optim.Adam(self.netF.parameters(), lr=opt.lr, betas=(opt.beta1, 0.999))
             self.optimizers.append(self.optimizer_G)
             self.optimizers.append(self.optimizer_P)
             self.optimizers.append(self.optimizer_D)
@@ -192,8 +173,7 @@ class IPSR(BaseModel):
         self.loss_IPSR = self.criterionGAN(self.real_B, self.fake_B, False)
 
     def get_loss(self):
-        self.loss_valid = (self.criterionL1(self.fake_B, self.real_B) + self.criterionL1(self.fake_P,
-                                                                                         self.real_B)) * self.opt.lambda_A
+        self.loss_valid = (self.criterionL1(self.fake_B, self.real_B) + self.criterionL1(self.fake_P, self.real_B)) * self.opt.lambda_A
         return OrderedDict([('GAN', self.loss_valid.data.item())])
 
     def backward_D(self):
@@ -222,11 +202,9 @@ class IPSR(BaseModel):
         pred_real = self.netD(self.real_B)
         pred_real_F = self.netF(self.gt_latent_real.relu3_3)
 
-        self.loss_G_GAN = self.criterionGAN(pred_fake, pred_real, False) + self.criterionGAN(pred_fake_f, pred_real_F,
-                                                                                             False)
+        self.loss_G_GAN = self.criterionGAN(pred_fake, pred_real, False) + self.criterionGAN(pred_fake_f, pred_real_F, False)
         # Second, G(A) = B
-        self.loss_G_L1 = (self.criterionL1(self.fake_B, self.real_B) + self.criterionL1(self.fake_P,
-                                                                                        self.real_B)) * self.opt.lambda_A
+        self.loss_G_L1 = (self.criterionL1(self.fake_B, self.real_B) + self.criterionL1(self.fake_P, self.real_B)) * self.opt.lambda_A
         self.loss_G = self.loss_G_L1 + self.loss_G_GAN * self.opt.gan_weight
 
         # Third add additional netG contraint loss!
@@ -370,7 +348,7 @@ class Option():
         self.n_layers_D = '3'  # network depth
         self.gpu_ids = [0]  # use gpu_id 1
         self.model = 'ipsr_net'
-        self.checkpoints_dir = r'/home/jara/DeepInPainting/checkpoints'  #
+        self.checkpoints_dir = r'/home/jara/DeepInPainting/checkpoints'
         self.norm = 'instance'
         self.fixed_mask = 1
         self.use_dropout = True
@@ -397,9 +375,9 @@ class Option():
         self.save_latest_freq = 5000
         self.save_epoch_freq = 1
         self.continue_train = False
-        self.epoch_count = 51
+        self.epoch_count = 1
         self.phase = 'train'
-        self.which_epoch = 51
+        self.which_epoch = ''
         self.niter = 20
         self.niter_decay = 100
         self.beta1 = 0.5
@@ -469,8 +447,7 @@ for epoch in range(opt.epoch_count, opt.niter + opt.niter_decay + 1):
         if total_steps % opt.display_freq == 0:
             real_A, real_Ref, fake_B, fake_P, real_B = model.get_current_visuals()
             pic = (torch.cat([real_A, real_Ref, fake_P, fake_B], dim=0) + 1) / 2.0
-            torchvision.utils.save_image(pic, '%s/Epoch_(%d)_(%dof%d).jpg' % (
-                r'/home/jara/DeepInPainting/saveimg', epoch, total_steps + 1, len(dataset_train)), nrow=2)
+            torchvision.utils.save_image(pic, '%s/Epoch_(%d)_(%dof%d).jpg' % (r'/home/jara/DeepInPainting/saveimg', epoch, total_steps + 1, len(dataset_train)), nrow=2)
 
     model.save(epoch)
 
