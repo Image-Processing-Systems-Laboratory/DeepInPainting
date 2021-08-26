@@ -82,8 +82,6 @@ def define_G(input_nc, output_nc, ngf, which_model_netG, opt, mask_global, norm=
     netG = None
     norm_layer = get_norm_layer(norm_type=norm)
 
-
-
     cosis_list = []
     cosis_list2 = []
     ipsr_model = []
@@ -96,10 +94,6 @@ def define_G(input_nc, output_nc, ngf, which_model_netG, opt, mask_global, norm=
     else:
         raise NotImplementedError('Generator model name [%s] is not recognized' % which_model_netG)
  
-    
-
-
-
     return init_net(netG, init_type, init_gain, gpu_ids),cosis_list ,cosis_list2,ipsr_model
 
 

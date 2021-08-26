@@ -47,10 +47,10 @@ class IPSR(BaseModel):
             self.use_gpu = True
             self.mask_global = self.mask_global.cuda()
         
-        # refinement
-        self.netG,self.Cosis_list,self.Cosis_list2, self.CSA_model= networks.define_G(opt.input_nc_g, opt.output_nc, opt.ngf,
+        # refinement network
+        self.netG,self.Cosis_list,self.Cosis_list2, self.IPSR_model= networks.define_G(opt.input_nc_g, opt.output_nc, opt.ngf,
                                       opt.which_model_netG, opt, self.mask_global, opt.norm, opt.use_dropout, opt.init_type, self.gpu_ids, opt.init_gain)
-        # rough
+        # rough network
         self.netP,_,_,_=networks.define_G(opt.input_nc, opt.output_nc, opt.ngf,
                                     opt.which_model_netP, opt, self.mask_global, opt.norm, opt.use_dropout, opt.init_type, self.gpu_ids, opt.init_gain)
         
@@ -65,8 +65,7 @@ class IPSR(BaseModel):
                                           opt.n_layers_D, opt.norm, use_sigmoid, opt.init_type, self.gpu_ids, opt.init_gain)
             self.netF = networks.define_D(opt.input_nc, opt.ndf,
                                           opt.which_model_netF,
-                                          opt.n_layers_D, opt.norm, use_sigmoid, opt.init_type, self.gpu_ids,
-                                          opt.init_gain) 
+                                          opt.n_layers_D, opt.norm, use_sigmoid, opt.init_type, self.gpu_ids, opt.init_gain) 
         
         if not self.isTrain or opt.continue_train:
             print('Loading pre-trained network!')
@@ -75,29 +74,29 @@ class IPSR(BaseModel):
             if self.isTrain:
                 self.load_network(self.netD, 'D', opt.which_epoch)
                 self.load_network(self.netF, 'F', opt.which_epoch)
-        self.criterionGAN = networks.GANLoss(gan_type=opt.gan_type, tensor=self.Tensor)
-        self.criterionL1 = torch.nn.L1Loss()
         
         # loss 
         if self.isTrain:
             self.old_lr = opt.lr
             # define loss functions
+            self.criterionGAN = networks.GANLoss(gan_type=opt.gan_type, tensor=self.Tensor)
+            self.criterionL1 = torch.nn.L1Loss()
 
             # initialize optimizers
             self.schedulers = []
             self.optimizers = []
             self.optimizer_G = torch.optim.Adam(self.netG.parameters(),
-                                                lr=opt.lr, betas=(opt.beta1, 0.999))
+                                lr=opt.lr, betas=(opt.beta1, 0.999))
             self.optimizer_P = torch.optim.Adam(self.netP.parameters(),
                                 lr=opt.lr, betas=(opt.beta1, 0.999))
             self.optimizer_D = torch.optim.Adam(self.netD.parameters(),
-                                                lr=opt.lr, betas=(opt.beta1, 0.999))
+                                lr=opt.lr, betas=(opt.beta1, 0.999))
             self.optimizer_F = torch.optim.Adam(self.netF.parameters(),
                                 lr=opt.lr, betas=(opt.beta1, 0.999))
             self.optimizers.append(self.optimizer_G)
             self.optimizers.append(self.optimizer_P)
-            self.optimizers.append(self.optimizer_D)
-            self.optimizers.append(self.optimizer_F)
+            # self.optimizers.append(self.optimizer_D)
+            # self.optimizers.append(self.optimizer_F)
             for optimizer in self.optimizers:
                 self.schedulers.append(networks.get_scheduler(optimizer, opt))
 
@@ -153,7 +152,7 @@ class IPSR(BaseModel):
 
     # It is quite convinient, as one forward-pass, all the innerCos will get the GT_latent!
     def set_latent_mask(self, mask_global, layer_to_last, threshold):
-        self.CSA_model[0].set_mask(mask_global, layer_to_last, threshold)
+        self.IPSR_model[0].set_mask(mask_global, layer_to_last, threshold)
         self.Cosis_list[0].set_mask(mask_global, self.opt)
         self.Cosis_list2[0].set_mask(mask_global, self.opt)
         
@@ -161,7 +160,7 @@ class IPSR(BaseModel):
     # training
     def set_ref_latent(self):
         self.ref_latent=self.vgg(Variable(self.input_ref,requires_grad=False))
-        self.CSA_model[0].set_ref(self.ref_latent)
+        self.IPSR_model[0].set_ref(self.ref_latent)
         
         
     # propagation init
@@ -177,7 +176,6 @@ class IPSR(BaseModel):
         
         # refinement
         self.fake_B = self.netG(self.Middle)
-
         self.real_B = self.input_B.to(self.device)
         self.real_Ref = self.input_ref.to(self.device)
         
@@ -212,9 +210,6 @@ class IPSR(BaseModel):
         self.gt_latent_fake = self.vgg(Variable(self.fake_B.data, requires_grad=False))
         self.gt_latent_real = self.vgg(Variable(self.input_B, requires_grad=False))
         real_AB = self.real_B # GroundTruth
-
-
-
 
         self.pred_fake = self.netD(fake_AB.detach())
         self.pred_real = self.netD(real_AB)
@@ -286,12 +281,11 @@ class IPSR(BaseModel):
                             ])
 
     def get_current_visuals(self):
-
-        real_A =self.real_A.data
-        fake_B = self.fake_B.data
-        real_B =self.real_B.data
-        real_Ref = self.real_Ref.data
-        fake_P =self.fake_P.data
+        real_A =self.real_A.data  # Ground Truth(For masking)
+        fake_B = self.fake_B.data  # result image
+        real_B =self.real_B.data  # Ground Truth(L1 loss)
+        real_Ref = self.real_Ref.data  # reference image
+        fake_P =self.fake_P.data  # rough image
         return real_A,real_Ref,fake_B,fake_P,real_B
 
     def get_error(self):
