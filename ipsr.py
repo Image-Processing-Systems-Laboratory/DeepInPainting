@@ -26,6 +26,7 @@ from torch.optim import lr_scheduler
 import inspect, re
 import collections
 import math
+from IQA_pytorch import SSIM
 
 
 # MaxCoord.py
@@ -1476,7 +1477,7 @@ class EarlyStopping:
 
 
 # train.ipynb
-class Option():
+class TrainOption():
     def __init__(self):
         self.dataroot = r'/home/jara/dataset/Paris StreetView/train'
         self.refroot = r'/home/jara/dataset/Paris StreetView/train_ref'
@@ -1538,7 +1539,7 @@ class Option():
         self.isTrain = True
 
 
-opt = Option()
+opt = TrainOption()
 transform_mask = transforms.Compose(
     [transforms.Resize((opt.fineSize, opt.fineSize)),
      transforms.ToTensor(),
@@ -1565,12 +1566,16 @@ iterator_train = (data.DataLoader(dataset_train, batch_size=opt.batchSize, shuff
 dataset_valid = Data_load(opt.validroot, opt.maskroot, opt.validrefroot, transform, transform_mask, transform_ref)
 iterator_valid = (data.DataLoader(dataset_valid, batch_size=opt.batchSize, shuffle=True))
 
+train_save_dir = r'/home/jara/DeepInPainting/train_result'
+if os.path.exists(train_save_dir) is False:
+    os.makedirs(train_save_dir)
+
 # Create model
 model = create_model(opt)
 total_steps = 0
 
 iter_start_time = time.time()
-early = EarlyStopping(20)
+early = EarlyStopping(8)
 
 train_loss = []
 valid_loss = []
@@ -1604,7 +1609,7 @@ for epoch in range(opt.epoch_count, opt.niter + opt.niter_decay + 1):
             real_A, real_Ref, fake_B, fake_P, real_B = model.get_current_visuals()
             # real_A=input, real_B=ground truth, fake_b=output, fake_p=rough
             pic = (torch.cat([real_A, real_Ref, fake_P, fake_B], dim=0) + 1) / 2.0
-            torchvision.utils.save_image(pic, '%s/Epoch_(%d)_(%dof%d).jpg' % (r'/home/jara/DeepInPainting/saveimg', epoch, total_steps + 1, len(dataset_train)), nrow=2)
+            torchvision.utils.save_image(pic, '%s/Epoch_(%d)_(%dof%d).jpg' % (train_save_dir, epoch, total_steps + 1, len(dataset_train)), nrow=2)
 
     model.save(epoch)
 
@@ -1637,3 +1642,117 @@ for epoch in range(opt.epoch_count, opt.niter + opt.niter_decay + 1):
         break
 
     model.update_learning_rate()
+
+
+# test.ipynb
+class TestOption():
+    def __init__(self):
+        self.dataroot = r'/home/jara/dataset/Paris StreetView/test'
+        self.refroot = r'/home/jara/dataset/Paris StreetView/test_ref'
+        self.maskroot = r'/home/jara/dataset/mask'
+        self.batchSize = 1  # Need to be set to 1
+        self.fineSize = 256  # image size
+        self.input_nc = 3  # input channel size for first stage
+        self.input_nc_g = 6  # input channel size for second stage
+        self.output_nc = 3  # output channel size
+        self.ngf = 64  # inner channel
+        self.ndf = 64  # inner channel
+        self.which_model_netD = 'basic'  # patch discriminator
+        self.which_model_netF = 'feature'  # feature patch discriminator
+        self.which_model_netG = 'unet_ipsr'  # second stage network
+        self.which_model_netP = 'unet_256'  # first stage network
+        self.triple_weight = 1
+        self.name = 'IPSR_inpainting'
+        self.n_layers_D = '3'  # network depth
+        self.gpu_ids = [0]
+        self.model = 'ipsr_net'
+        self.checkpoints_dir = r'/home/jara/DeepInPainting/checkpoints'
+        self.norm = 'instance'
+        self.fixed_mask = 1
+        self.use_dropout = False
+        self.init_type = 'normal'
+        self.mask_type = 'random'
+        self.lambda_A = 100
+        self.threshold = 5 / 16.0
+        self.stride = 1
+        self.shift_sz = 1  # size of feature patch
+        self.mask_thred = 1
+        self.bottleneck = 512
+        self.gp_lambda = 10.0
+        self.ncritic = 5
+        self.constrain = 'MSE'
+        self.strength = 1
+        self.init_gain = 0.02
+        self.cosis = 1
+        self.gan_type = 'lsgan'
+        self.gan_weight = 0.2
+        self.overlap = 4
+        self.skip = 0
+        self.display_freq = 1000
+        self.print_freq = 50
+        self.save_latest_freq = 5000
+        self.save_epoch_freq = 2
+        self.continue_train = False
+        self.epoch_count = 1
+        self.phase = 'train'
+        self.which_epoch = 46
+        self.niter = 20
+        self.niter_decay = 100
+        self.beta1 = 0.5
+        self.lr = 0.0002
+        self.lr_policy = 'lambda'
+        self.lr_decay_iters = 50
+        self.isTrain = False
+
+
+opt = TestOption()
+dataset_test = Data_load(opt.dataroot, opt.maskroot, opt.dataroot, transform, transform_mask, transform_ref)
+iterator_test = (data.DataLoader(dataset_test, batch_size=opt.batchSize, shuffle=True))
+print(len(dataset_test))
+model = create_model(opt)
+total_steps = 0
+
+load_epoch = 5
+model.load(load_epoch)
+
+test_save_dir = r'/home/jara/DeepInPainting/test_result'
+if os.path.exists(test_save_dir) is False:
+    os.makedirs(test_save_dir)
+
+epoch = 1
+i = 0
+for image, mask, ref in iterator_test:
+    iter_start_time = time.time()
+    image = image.cuda()
+    mask = mask.cuda()
+    mask = mask[0][0]
+    mask = torch.unsqueeze(mask, 0)
+    mask = torch.unsqueeze(mask, 1)
+    mask = mask.bool()
+
+    model.set_input(image, mask, ref)  # it not only sets the input data with mask, but also sets the latent mask.
+    model.set_ref_latent()
+    model.set_gt_latent()
+    model.test()
+
+    real_A, real_Ref, fake_B, fake_P, real_B = model.get_current_visuals()
+    pic = (torch.cat([real_A, real_Ref, fake_P, fake_B], dim=0) + 1) / 2.0
+    torchvision.utils.save_image(pic, '%s/Epoch_(%d)_(%dof%d).jpg' % (test_save_dir, epoch, total_steps + 1, len(dataset_test)), nrow=2)
+
+    psnr = 0
+    mse = 0
+    if type(real_B) == torch.Tensor:
+        mse = torch.mean((real_B - fake_B) ** 2)
+    else:
+        mse = np.mean((real_B - fake_B) ** 2)
+
+    if mse == 0:
+        psnr = 100
+    else:
+        psnr = 10 * torch.log10((2 ** 2) / mse)
+    errors = model.get_error()
+
+    mod = SSIM(channels=3)
+    score = mod(real_B, fake_B, as_loss=False)
+    print('PSNR : %f, SSIM : %f' % (psnr, score))
+    epoch = epoch + 1
