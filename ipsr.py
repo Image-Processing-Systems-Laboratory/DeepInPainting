@@ -1,3 +1,4 @@
+from __future__ import print_function
 import random
 from PIL import Image
 from glob import glob
@@ -22,13 +23,385 @@ from torch.nn import init
 import functools
 from torch.optim import lr_scheduler
 
-from models.InnerCos import InnerCos
-from models.InnerCos2 import InnerCos2
+import inspect, re
+import collections
+import math
 
-import util.util as util
 
-from util.NonparametricShift import NonparametricShift
-from util.MaxCoord import MaxCoord
+# MaxCoord.py
+# Input is a tensor
+# Input has to be 1*N*H*W
+# output and ind: are all 0-index!!
+
+# Additional params: pre-calculated constant tensor. `sp_x` and `px_y`.
+# They are just for Advanced Indexing.
+# sp_x: [0,0,..,0, 1,1,...,1, ..., 31,31,...,31],   length is 32*32, it is a list
+# sp_y: [0,1,2,...,31,  0,1,2,...,31,  0,1,2,...,31]  length is 32*32, it is a LongTensor(cuda.LongTensor)
+class MaxCoord():
+    def __init__(self):
+        pass
+
+    def update_output(self, input, sp_x, sp_y):
+        input_dim = input.dim()
+        assert input.dim() == 4, "Input must be 3D or 4D(batch)."
+        assert input.size(0) == 1, "The first dimension of input has to be 1!"
+        # 같은 크기이고 0인 tensor
+        output = torch.zeros_like(input)
+        v_max,c_max = torch.max(input, 1)
+        c_max_flatten = c_max.view(-1)
+        v_max_flatten = v_max.view(-1)
+        # output[:, c_max_flatten, sp_x, sp_y] = 1
+        ind = c_max_flatten
+
+        return output, ind,  v_max_flatten
+
+
+# NonparametricShift.py
+class NonparametricShift(object):
+    # inpatch.squeeze(), false, false ,///
+    def buildAutoencoder(self, target_img, normalize, interpolate, nonmask_point_idx, mask_point_idx, patch_size=1, stride=1):
+        nDim = 3
+        assert target_img.dim() == nDim, 'target image must be of dimension 3.'
+        C = target_img.size(0)  # 512
+
+        self.Tensor = torch.cuda.FloatTensor if torch.cuda.is_available else torch.Tensor
+
+        # [1024, 512, 1, 1], [1024, 512, 1, 1], [252, 512, 1, 1]
+        patches_all, patches_part, patches_mask = self._extract_patches(target_img, patch_size, stride, nonmask_point_idx, mask_point_idx)
+
+        # 개수에 해당하는 patch 개수
+        npatches_part = patches_part.size(0)  # [1024, 512, 1, 1] -> size(0) -> 772
+        npatches_all = patches_all.size(0)  # 1024
+        npatches_mask = patches_mask.size(0)  # 252
+
+        # M- -> as conv filter
+        conv_enc_non_mask, conv_dec_non_mask = self._build(patch_size, stride, C, patches_part, npatches_part, normalize, interpolate)
+
+        # M + M-
+        conv_enc_all, conv_dec_all = self._build(patch_size, stride, C, patches_all, npatches_all, normalize, interpolate)
+
+        return conv_enc_all, conv_enc_non_mask, conv_dec_all, conv_dec_non_mask, patches_part, patches_mask
+
+    # get cross-correlation
+    def _build(self, patch_size, stride, C, target_patches, npatches, normalize, interpolate):
+        # for each patch, divide by its L2 norm.
+        enc_patches = target_patches.clone()
+        for i in range(npatches):
+            enc_patches[i] = enc_patches[i] * (1 / (enc_patches[i].norm(2) + 1e-8))
+
+        # [1x1 conv2d]
+        conv_enc = nn.Conv2d(C, npatches, kernel_size=patch_size, stride=stride, bias=False)
+
+        conv_enc.weight.data = enc_patches
+
+        # normalize is not needed, it doesn't change the result!
+        if normalize:
+            raise NotImplementedError
+
+        if interpolate:
+            raise NotImplementedError
+
+        conv_dec = nn.ConvTranspose2d(npatches, C, kernel_size=patch_size, stride=stride, bias=False)
+        conv_dec.weight.data = target_patches
+
+        return conv_enc, conv_dec
+
+    def _extract_patches(self, img, patch_size, stride, nonmask_point_idx, mask_point_idx):
+        n_dim = 3
+        assert img.dim() == n_dim, 'image must be of dimension 3.'
+        # kH=1, kW=1，dH, dW=1
+        kH, kW = patch_size, patch_size
+        dH, dW = stride, stride
+        input_windows = img.unfold(1, kH, dH).unfold(2, kW, dW)
+        # 그중 i_1,i_2,i_3,i_4,i_5------1: 채널 수 2:가로축 위의 patch 개수 3:세로축 위의 patch 개수 4와 5는 각각 patch의 가로세로이다.
+        i_1, i_2, i_3, i_4, i_5 = input_windows.size(0), input_windows.size(1), input_windows.size(2), input_windows.size(3), input_windows.size(4)
+        input_windows = input_windows.permute(1, 2, 0, 3, 4).contiguous().view(i_2 * i_3, i_1, i_4, i_5)
+
+        patches_all = input_windows
+        patches = input_windows.index_select(0, nonmask_point_idx)  # It returns a new tensor, representing patches extracted from non-masked region!
+        maskpatches = input_windows.index_select(0, mask_point_idx)
+        return patches_all, patches, maskpatches
+
+    def _extract_patches_mask(self, img, patch_size, stride, nonmask_point_idx, mask_point_idx):
+        n_dim = 3
+        assert img.dim() == n_dim, 'image must be of dimension 3.'
+        # kH=1, kW=1，dH, dW=1
+        kH, kW = patch_size, patch_size
+        dH, dW = stride, stride
+        input_windows = img.unfold(1, kH, dH).unfold(2, kW, dW)
+        # 이중 i_1,i_2,i_3,i_4,i_5------1: 채널 수 2: 가로축 위의 patch 개수 3: 세로축 위의 patch 개수 4와 5는 각각 patch의 가로세로이다.
+        i_1, i_2, i_3, i_4, i_5 = input_windows.size(0), input_windows.size(1), input_windows.size(2), input_windows.size(3), input_windows.size(4)
+        input_windows = input_windows.permute(1, 2, 0, 3, 4).contiguous().view(i_2 * i_3, i_1, i_4, i_5)
+        maskpatches = input_windows.index_select(0, mask_point_idx)
+        return maskpatches
+
+
+# util.py
+# Converts a Tensor into a Numpy array
+# |imtype|: the desired type of the converted numpy array
+def tensor2im(image_tensor, imtype=np.uint8):
+    image_numpy = image_tensor[0].cpu().float().numpy()
+    if image_numpy.shape[0] == 1:
+        image_numpy = np.tile(image_numpy, (3, 1, 1))
+    image_numpy = (np.transpose(image_numpy, (1, 2, 0)) + 1) / 2.0 * 255.0
+    return image_numpy.astype(imtype)
+
+
+def diagnose_network(net, name='network'):
+    mean = 0.0
+    count = 0
+    for param in net.parameters():
+        if param.grad is not None:
+            mean += torch.mean(torch.abs(param.grad.data))
+            count += 1
+    if count > 0:
+        mean = mean / count
+
+
+def binary_mask(in_mask, threshold):
+    assert in_mask.dim() == 2, "mask must be 2 dimensions"
+
+    output = torch.ByteTensor(in_mask.size())
+    output = (output > threshold).float().mul_(1)
+
+    return output
+
+
+def create_gMask(gMask_opts):
+    pattern = gMask_opts['pattern']
+    mask_global = gMask_opts['mask_global']
+    MAX_SIZE = gMask_opts['MAX_SIZE']
+    fineSize = gMask_opts['fineSize']
+    maxPartition = gMask_opts['maxPartition']
+    if pattern is None:
+        raise ValueError
+    wastedIter = 0
+    while True:
+        x = random.randint(1, MAX_SIZE - fineSize)
+        y = random.randint(1, MAX_SIZE - fineSize)
+        mask = pattern[y:y + fineSize, x:x + fineSize]  # need check
+        area = mask.sum() * 100. / (fineSize * fineSize)
+        if 20 < area < maxPartition:
+            break
+        wastedIter += 1
+    if mask_global.dim() == 3:
+        mask_global = mask.expand(1, mask.size(0), mask.size(1))
+    else:
+        mask_global = mask.expand(1, 1, mask.size(0), mask.size(1))
+    return mask_global
+
+
+# inMask is tensor should be 1*1*256*256 float
+# Return: ByteTensor
+
+# get feature of mask
+def cal_feat_mask(inMask, conv_layers, threshold):
+    assert inMask.dim() == 4, "mask must be 4 dimensions"
+    assert inMask.size(0) == 1, "the first dimension must be 1 for mask"
+    inMask = inMask.float()
+    convs = []
+    inMask = Variable(inMask, requires_grad=False)
+    for id_net in range(conv_layers):
+        conv = nn.Conv2d(1, 1, 4, 2, 1, bias=False)
+        conv.weight.data.fill_(1 / 16)
+        convs.append(conv)
+    lnet = nn.Sequential(*convs)
+    if inMask.is_cuda:
+        lnet = lnet.cuda()
+    output = lnet(inMask)
+    output = (output > threshold).float().mul_(1)
+    output = Variable(output, requires_grad=False)
+    return output.detach().byte()
+
+
+# index
+def cal_mask_given_mask_thred(img, mask, patch_size, stride, mask_thred):
+    assert img.dim() == 3, 'img has to be 3 dimenison!'
+    assert mask.dim() == 2, 'mask has to be 2 dimenison!'
+    dim = img.dim()
+
+    _, H, W = img.size(dim - 3), img.size(dim - 2), img.size(dim - 1)  # c x 32 x 32
+
+    nH = int(math.floor((H - patch_size) / stride + 1))  #
+    nW = int(math.floor((W - patch_size) / stride + 1))  #
+
+    N = nH * nW  # 32x32 -> 1024
+
+    flag = torch.zeros(N).long()  # flag == 1 -> unknown region
+    offsets_tmp_vec = torch.zeros(N).long()  #
+
+    nonmask_point_idx_all = torch.zeros(N).long()  # nonmask 32x32
+
+    tmp_non_mask_idx = 0
+
+    mask_point_idx_all = torch.zeros(N).long()  # mask 32x32
+
+    tmp_mask_idx = 0
+
+    for i in range(N):
+        h = int(math.floor(i / nW))  # 1D -> 2D
+        w = int(math.floor(i % nW))  # 1D -> 2D
+
+        mask_tmp = mask[h * stride:h * stride + patch_size, w * stride:w * stride + patch_size]  # patch size = 1 -> 1 by 1
+
+        #         # determine whether mask or not
+        #         if torch.sum(mask_tmp) < mask_thred:    # mask_thread = 5/16
+        #             nonmask_point_idx_all[tmp_non_mask_idx] = i     # nonmask_point_idx_all = non_mask location
+        #             tmp_non_mask_idx += 1                           # tmp_non_maks_idx = non_mask count
+        #         else:
+        #             mask_point_idx_all[tmp_mask_idx] = i            # mask_location
+        #             tmp_mask_idx += 1                               # mask count
+        #             flag[i] = 1                                     # flag == 0,1 mask 1-> mask, 0->nonmask
+        #             offsets_tmp_vec[i] = -1
+
+        # get mask region
+        if torch.sum(mask_tmp) >= mask_thred:
+            mask_point_idx_all[tmp_mask_idx] = i  # mask_location
+            tmp_mask_idx += 1  # mask count
+            flag[i] = 1  # flag == 0,1 mask 1-> mask, 0->nonmask
+            offsets_tmp_vec[i] = -1
+        # non-mask region -> ref == 1024
+        nonmask_point_idx_all[tmp_non_mask_idx] = i
+        tmp_non_mask_idx += 1  # 1024
+
+    non_mask_num = tmp_non_mask_idx
+    mask_num = tmp_mask_idx
+
+    nonmask_point_idx = nonmask_point_idx_all.narrow(0, 0, non_mask_num)  # [1, 2, 3, 4, 5, 6, 7.. 10]
+    mask_point_idx = mask_point_idx_all.narrow(0, 0, mask_num)  # [2, 4, 7, 8, 9]
+
+    # get flatten_offsets, N == 1024
+    flatten_offsets_all = torch.LongTensor(N).zero_()  # ack mask count
+    for i in range(N):
+        offset_value = torch.sum(offsets_tmp_vec[0:i + 1])
+        if flag[i] == 1:
+            offset_value = offset_value + 1
+        flatten_offsets_all[i + offset_value] = -offset_value
+
+    flatten_offsets = flatten_offsets_all.narrow(0, 0, non_mask_num)  # 772 <- value?
+
+    # flag -> [0, 0, ... 1, 1, 1,... 0, 0] ,  nonmask -> [0,1, .... // .. 1023, 1024], mask_point_idx -> [256, 257, ...],
+    return flag, nonmask_point_idx, flatten_offsets, mask_point_idx
+
+
+# sp_x: LongTensor
+# sp_y: LongTensor
+def cal_sps_for_Advanced_Indexing(h, w):
+    sp_y = torch.arange(0, w).long()
+    sp_y = torch.cat([sp_y] * h)
+
+    lst = []
+    for i in range(h):
+        lst.extend([i] * w)
+    sp_x = torch.from_numpy(np.array(lst))
+    return sp_x, sp_y
+
+
+def save_image(image_numpy, image_path):
+    image_pil = Image.fromarray(image_numpy)
+    image_pil.save(image_path)
+
+
+def info(object, spacing=10, collapse=1):
+    """Print methods and doc strings.
+    Takes module, class, list, dictionary, or string."""
+    methodList = [e for e in dir(object) if isinstance(getattr(object, e), collections.Callable)]
+    processFunc = collapse and (lambda s: " ".join(s.split())) or (lambda s: s)
+    print("\n".join(["%s %s" % (method.ljust(spacing), processFunc(str(getattr(object, method).__doc__))) for method in methodList]))
+
+
+# InnerCos.py
+class InnerCos(nn.Module):
+    def __init__(self, crit='MSE', strength=1, skip=0):
+        super(InnerCos, self).__init__()
+        self.crit = crit
+        self.criterion = torch.nn.MSELoss() if self.crit == 'MSE' else torch.nn.L1Loss()
+        self.strength = strength
+        self.target = None
+        # To define whether this layer is skipped.
+        self.skip = skip
+
+    def set_mask(self, mask_global, opt):
+        mask = cal_feat_mask(mask_global, 3, opt.threshold)
+        self.mask = mask.squeeze()
+        if torch.cuda.is_available:
+            self.mask = self.mask.float().cuda()
+        self.mask = Variable(self.mask, requires_grad=False)
+
+    def set_target(self, targetIn):
+        self.target = targetIn
+
+    def get_target(self):
+        return self.target
+
+    def forward(self, in_data):
+        if not self.skip:
+            self.bs, self.c, _, _ = in_data.size()
+            self.former = in_data
+            self.former_in_mask = torch.mul(self.former, self.mask)
+            self.loss = self.criterion(self.former_in_mask * self.strength, self.target)
+            self.output = in_data
+        else:
+            self.loss = 0
+            self.output = in_data
+        return self.output
+
+    def backward(self, retain_graph=True):
+        if not self.skip:
+            self.loss.backward(retain_graph=retain_graph)
+        return self.loss
+
+    def __repr__(self):
+        skip_str = 'True' if not self.skip else 'False'
+        return self.__class__.__name__ + '(' + 'skip: ' + skip_str + ' ,strength: ' + str(self.strength) + ')'
+
+
+# InnerCos2.py
+class InnerCos2(nn.Module):
+    def __init__(self, crit='MSE', strength=1, skip=0, infe=None):
+        super(InnerCos2, self).__init__()
+        self.crit = crit
+        self.criterion = torch.nn.MSELoss() if self.crit == 'MSE' else torch.nn.L1Loss()
+        self.strength = strength
+        self.inin = None
+        self.target = None
+        # To define whether this layer is skipped.
+        self.skip = skip
+        self.infe = infe
+
+    def set_mask(self, mask_global, opt):
+        mask = cal_feat_mask(mask_global, 3, opt.threshold)
+        self.mask = mask.squeeze()
+        if torch.cuda.is_available:
+            self.mask = self.mask.float().cuda()
+        self.mask = Variable(self.mask, requires_grad=False)
+
+    def set_target(self, targetIn):
+        self.target = targetIn
+
+    def get_target(self):
+        return self.target
+
+    def forward(self, in_data):
+        if not self.skip:
+            self.former = in_data.narrow(1, 0, 512)
+            self.bs, self.c, _, _ = self.former.size()
+            self.former_in_mask = torch.mul(self.former, self.mask)
+            self.loss = self.criterion(self.former_in_mask * self.strength, self.target)
+            self.output = in_data
+        else:
+            self.loss = 0
+            self.output = in_data
+        return self.output
+
+    def backward(self, retain_graph=True):
+        if not self.skip:
+            self.loss.backward(retain_graph=retain_graph)
+        return self.loss
+
+    def __repr__(self):
+        skip_str = 'True' if not self.skip else 'False'
+        return self.__class__.__name__ + '(' + 'skip: ' + skip_str + ' ,strength: ' + str(self.strength) + ')'
 
 
 # IPSRFunction.py
@@ -201,15 +574,15 @@ class IPSR_model(nn.Module):
         self.stride = stride
         self.mask_thred = mask_thred
         self.triple_weight = triple_weight
-        self.cal_fixed_flag = True  # whether we need to calculate the temp varaiables this time. 临时变量
-        # 这是恒定的张量，与空间相关，与马赛克范围无关
+        self.cal_fixed_flag = True  # whether we need to calculate the temp varaiables this time. 임시변수
+        # 이것은 고정된 장량으로 공간과 관련되어 모자이크 범위와 무관하다.
         # these two variables are for accerlating MaxCoord, it is constant tensors,
         # related with the spatialsize, unrelated with mask.
         self.sp_x = None
         self.sp_y = None
 
     def set_mask(self, mask_global, layer_to_last, threshold):
-        mask = util.cal_feat_mask(mask_global, layer_to_last, threshold)
+        mask = cal_feat_mask(mask_global, layer_to_last, threshold)
         self.mask = mask.squeeze()
         return self.mask
 
@@ -226,12 +599,12 @@ class IPSR_model(nn.Module):
             latter = input.narrow(0, 0, 1).data
 
             # index needs to be modified  [1024], x, [252]
-            self.flag, self.nonmask_point_idx, self.flatten_offsets, self.mask_point_idx = util.cal_mask_given_mask_thred(latter.squeeze(), self.mask, self.shift_sz, self.stride, self.mask_thred)
+            self.flag, self.nonmask_point_idx, self.flatten_offsets, self.mask_point_idx = cal_mask_given_mask_thred(latter.squeeze(), self.mask, self.shift_sz, self.stride, self.mask_thred)
             self.cal_fixed_flag = True
 
         if not (torch.is_tensor(self.sp_x) or torch.is_tensor(self.sp_y)):
             # 返回
-            self.sp_x, self.sp_y = util.cal_sps_for_Advanced_Indexing(self.h, self.w)
+            self.sp_x, self.sp_y = cal_sps_for_Advanced_Indexing(self.h, self.w)
 
         # input == rough output -> refinement -> feature  ,,, ref_latent
         return IPSRFunction.apply(input, self.mask, self.ref, self.shift_sz, self.stride, self.triple_weight, self.flag, self.nonmask_point_idx, self.mask_point_idx, self.flatten_offsets, self.sp_x, self.sp_y)
@@ -694,6 +1067,7 @@ def print_network(net):
     print('Total number of parameters: %d' % num_params)
 
 
+# vgg16.py
 class Vgg16(torch.nn.Module):
     def __init__(self, requires_grad=False):
         super(Vgg16, self).__init__()
@@ -728,6 +1102,7 @@ class Vgg16(torch.nn.Module):
         return out
 
 
+# base_model.py
 class BaseModel():
     def name(self):
         return 'BaseModel'
@@ -790,6 +1165,7 @@ class BaseModel():
         print('learning rate = %.7f' % lr)
 
 
+# IPSR.py
 class IPSRModel(BaseModel):
     def name(self):
         return 'IPSRModel'
@@ -879,7 +1255,7 @@ class IPSRModel(BaseModel):
         input_A = input  # Ground Truth(For masking)
         input_B = input  # Ground Truth(For L1 loss)
         input_mask = mask  # Mask
-        input_ref = ref  # Augmented Image
+        input_ref = ref  # Reference Image
 
         self.input_A.resize_(input_A.size()).copy_(input_A)
         self.input_B.resize_(input_B.size()).copy_(input_B)
@@ -1048,6 +1424,7 @@ def create_model(opt):
     return model
 
 
+# data_load.py
 class Data_load(torch.utils.data.Dataset):
     def __init__(self, img_root, mask_root, ref_root, img_transform, mask_transform, ref_transform):
         super(Data_load, self).__init__()
@@ -1098,6 +1475,7 @@ class EarlyStopping:
             self.counter = 0
 
 
+# train.ipynb
 class Option():
     def __init__(self):
         self.dataroot = r'/home/jara/dataset/Paris StreetView/train'
@@ -1170,8 +1548,13 @@ transform_ref = transforms.Compose(
      transforms.ColorJitter(brightness=0.1, contrast=0.1, saturation=0.1, hue=0.1),
      transforms.ToTensor(),
      transforms.Normalize(mean=[0.5] * 3, std=[0.5] * 3)])
+# transform = transforms.Compose(
+#     [transforms.RandomResizedCrop((opt.fineSize, opt.fineSize), scale=(0.8, 1.0), ratio=(1, 1)),
+#      transforms.ToTensor(),
+#      transforms.Normalize(mean=[0.5] * 3, std=[0.5] * 3)])
 transform = transforms.Compose(
-    [transforms.RandomResizedCrop((opt.fineSize, opt.fineSize), scale=(0.8, 1.0), ratio=(1, 1)),
+    [transforms.RandomHorizontalFlip(),
+     transforms.Resize((opt.fineSize, opt.fineSize)),
      transforms.ToTensor(),
      transforms.Normalize(mean=[0.5] * 3, std=[0.5] * 3)])
 
@@ -1209,7 +1592,7 @@ for epoch in range(opt.epoch_count, opt.niter + opt.niter_decay + 1):
         total_steps += opt.batchSize
         epoch_iter += opt.batchSize
 
-        model.set_input(image, mask, ref)  # it not only sets the input data with mask, but also sets the latent mask.
+        model.set_input(image, mask, image)  # it not only sets the input data with mask, but also sets the latent mask.
         model.set_ref_latent()
         model.set_gt_latent()
         model.optimize_parameters()  # forward
@@ -1219,6 +1602,7 @@ for epoch in range(opt.epoch_count, opt.niter + opt.niter_decay + 1):
 
         if total_steps % opt.display_freq == 0:
             real_A, real_Ref, fake_B, fake_P, real_B = model.get_current_visuals()
+            # real_A=input, real_B=ground truth, fake_b=output, fake_p=rough
             pic = (torch.cat([real_A, real_Ref, fake_P, fake_B], dim=0) + 1) / 2.0
             torchvision.utils.save_image(pic, '%s/Epoch_(%d)_(%dof%d).jpg' % (r'/home/jara/DeepInPainting/saveimg', epoch, total_steps + 1, len(dataset_train)), nrow=2)
 
@@ -1232,7 +1616,7 @@ for epoch in range(opt.epoch_count, opt.niter + opt.niter_decay + 1):
         mask = torch.unsqueeze(mask, 1)
         mask = mask.bool()
 
-        model.set_input(image, mask, ref)  # it not only sets the input data with mask, but also sets the latent mask.
+        model.set_input(image, mask, image)  # it not only sets the input data with mask, but also sets the latent mask.
         model.set_ref_latent()
         model.set_gt_latent()
         model.test()

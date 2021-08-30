@@ -286,6 +286,7 @@ class CSA(BaseModel):
                             ])
 
     def get_current_visuals(self):
+
         real_A = self.real_A.data
         fake_B = self.fake_B.data
         real_B = self.real_B.data
