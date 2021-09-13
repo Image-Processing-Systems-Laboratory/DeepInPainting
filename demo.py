@@ -1000,7 +1000,7 @@ def init_weights(net, init_type='normal', gain=0.02):
         classname = m.__class__.__name__
         if hasattr(m, 'weight') and (classname.find('Conv') != -1 or classname.find('Linear') != -1):
             if init_type == 'normal':
-                init.normal(m.weight.data, 0.0, gain)
+                init.normal_(m.weight.data, 0.0, gain)
             elif init_type == 'xavier':
                 init.xavier_normal(m.weight.data, gain=gain)
             elif init_type == 'kaiming':
@@ -1010,7 +1010,7 @@ def init_weights(net, init_type='normal', gain=0.02):
             else:
                 raise NotImplementedError('initialization method [%s] is not implemented' % init_type)
             if hasattr(m, 'bias') and m.bias is not None:
-                init.constant(m.bias.data, 0.0)
+                init.constant_(m.bias.data, 0.0)
         elif classname.find('BatchNorm2d') != -1:
             init.normal(m.weight.data, 1.0, gain)
             init.constant(m.bias.data, 0.0)
@@ -1454,6 +1454,7 @@ class Data_load(torch.utils.data.Dataset):
         padding = torch.nn.ZeroPad2d((0, 256*4-936, 0, 256*3-537))
         gt_img = padding(gt_img)
         mask = padding(mask)
+        ref = padding(ref)
         ############################################################
         return gt_img, mask, ref
 
@@ -1531,20 +1532,17 @@ opt = TestOption()
 #      transforms.ToTensor(),
 #      transforms.Normalize(mean=[0.5] * 3, std=[0.5] * 3)
 #     ])
+
 transform_ref = transforms.Compose(
-    [transforms.Resize((opt.fineSize, opt.fineSize)),
-     transforms.ColorJitter(brightness=0.1, contrast=0.1, saturation=0.1, hue=0.1),
+    [transforms.RandomAffine(degrees=(0, 0), translate=(0.1, 0.3)),
      transforms.ToTensor(),
      transforms.Normalize(mean=[0.5] * 3, std=[0.5] * 3)])
-
 transform_mask = transforms.Compose(
     [transforms.Resize((537, 936)),
-     transforms.ToTensor(),
-    ])
+     transforms.ToTensor()])
 transform = transforms.Compose(
     [transforms.ToTensor(),
-     transforms.Normalize(mean=[0.5] * 3, std=[0.5] * 3)
-    ])
+     transforms.Normalize(mean=[0.5] * 3, std=[0.5] * 3)])
 
 dataset_test = Data_load(opt.dataroot, opt.maskroot, opt.dataroot, transform, transform_mask, transform_ref)
 iterator_test = (data.DataLoader(dataset_test, batch_size=opt.batchSize, shuffle=False))
@@ -1555,7 +1553,7 @@ total_steps = 0
 load_epoch = 72
 model.load(load_epoch)
 
-test_save_dir = r'/home/jara/DeepInPainting/test_result'
+test_save_dir = r'/home/jara/DeepInPainting/test_images'
 if os.path.exists(test_save_dir) is False:
     os.makedirs(test_save_dir)
 
@@ -1581,7 +1579,7 @@ for image, mask, ref in iterator_test:
     mask = torch.unsqueeze(mask, 1)
     mask = mask.bool()
 
-    model.set_input(image, mask, image)  # it not only sets the input data with mask, but also sets the latent mask.
+    model.set_input(image, mask, ref)  # it not only sets the input data with mask, but also sets the latent mask.
     model.set_ref_latent()
     model.set_gt_latent()
     model.test()
