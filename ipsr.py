@@ -1000,7 +1000,7 @@ def init_weights(net, init_type='normal', gain=0.02):
         classname = m.__class__.__name__
         if hasattr(m, 'weight') and (classname.find('Conv') != -1 or classname.find('Linear') != -1):
             if init_type == 'normal':
-                init.normal(m.weight.data, 0.0, gain)
+                init.normal_(m.weight.data, 0.0, gain)
             elif init_type == 'xavier':
                 init.xavier_normal(m.weight.data, gain=gain)
             elif init_type == 'kaiming':
@@ -1010,7 +1010,7 @@ def init_weights(net, init_type='normal', gain=0.02):
             else:
                 raise NotImplementedError('initialization method [%s] is not implemented' % init_type)
             if hasattr(m, 'bias') and m.bias is not None:
-                init.constant(m.bias.data, 0.0)
+                init.constant_(m.bias.data, 0.0)
         elif classname.find('BatchNorm2d') != -1:
             init.normal(m.weight.data, 1.0, gain)
             init.constant(m.bias.data, 0.0)
@@ -1567,7 +1567,7 @@ iterator_train = (data.DataLoader(dataset_train, batch_size=opt.batchSize, shuff
 dataset_valid = Data_load(opt.validroot, opt.maskroot, opt.validrefroot, transform, transform_mask, transform_ref)
 iterator_valid = (data.DataLoader(dataset_valid, batch_size=opt.batchSize, shuffle=True))
 
-train_save_dir = r'/home/jara/DeepInPainting/train_result'
+train_save_dir = r'/home/jara/DeepInPainting/train_images'
 if os.path.exists(train_save_dir) is False:
     os.makedirs(train_save_dir)
 
